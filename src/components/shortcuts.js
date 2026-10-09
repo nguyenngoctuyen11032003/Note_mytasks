@@ -64,6 +64,8 @@ export function initShortcuts({ enabled, onQuickAdd }) {
     // Ctrl/⌘+K — palette, from anywhere (also inside text fields).
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
       if (modalOpen() && !isPaletteOpen()) return;
+      // Inside the rich note editor Ctrl+K means "insert link" (handled by the editor).
+      if (e.target?.closest?.('.rt[contenteditable="true"]')) return;
       e.preventDefault();
       e.stopPropagation();
       togglePalette();

@@ -661,6 +661,7 @@ export function bindImageUi(editor, { uploadImage, onError } = {}) {
     view(fig);
   });
   listen(root, 'rt:request-image', (e) => {
+    if (e.defaultPrevented) return; // the page already opened the picker
     const range = currentRange(root)?.cloneRange() || null;
     const camera = !!e.detail?.camera;
     pickImageFiles({ multiple: !camera, camera }).then((files) => {

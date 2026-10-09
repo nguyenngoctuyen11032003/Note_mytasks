@@ -1175,7 +1175,8 @@ export default async function notesPage(root, { query, signal }) {
   }
 
   /* ---------- images & recordings ---------- */
-  const onRequestImage = () => insertImage();
+  // preventDefault: images.js also listens; only one file picker may open (it needs the user activation).
+  const onRequestImage = (e) => { e.preventDefault(); insertImage(); };
   const onRequestRecord = () => startRecording();
   const onRender = () => { if (ed) hydrate(ed.el); };
   // Ctrl+K inside the editor: our popover instead of window.prompt.

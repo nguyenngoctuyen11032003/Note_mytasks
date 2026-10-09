@@ -1645,7 +1645,7 @@ export function createRichEditor(container, options = {}) {
         break;
       case 'image':
         afterMutation('cmd');
-        emit('rt:request-image', {});
+        emit('rt:request-image', {}, true); // cancelable: a handler that opens the picker calls preventDefault
         return;
       case 'record':
         afterMutation('cmd');
@@ -2221,6 +2221,7 @@ export function createRichEditor(container, options = {}) {
       if (e.shiftKey && code === 'KeyU') return handled(), cycleCase();
       if (e.shiftKey && code === 'KeyX') return handled(), exec('strike');
       if (e.shiftKey && code === 'KeyH') return handled(), exec('mark');
+      if (!e.shiftKey && (key === 'e' || code === 'KeyE')) return handled(), exec('code');
       if (!e.shiftKey && (key === 'k' || code === 'KeyK')) return handled(), requestLink();
       if (key === '\\' || code === 'Backslash') return handled(), exec('clearFormatting');
       if (e.shiftKey && code === 'Digit7') return handled(), exec('ol');

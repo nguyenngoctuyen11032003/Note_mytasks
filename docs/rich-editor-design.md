@@ -166,12 +166,13 @@ calls `onInsert` with:
 ```
 ## 🎙 Ghi âm cuộc họp — 14:05, 09/10/2026 (12:34)
 [Ghi âm 12:34](nm-media:<path>.webm)
+<!-- saved canonically with a blank line after the heading -->
 
 **Bản chép lời**
 - **[00:05]** …
 - **[01:20]** ⭐ Đánh dấu: …
 ```
-(no transcript section when transcription was off or empty). Audio: `audio/webm;codecs=opus`
+(the "Bản chép lời" section is omitted only when there are neither transcript lines nor bookmarks — bookmarks are kept even with transcription off). Audio: `audio/webm;codecs=opus`
 (fallback `audio/mp4`), 32 kbps.
 
 ### Page integration (stream A7) — `src/pages/notes.js`, `src/css/pages/notes.css`, new `src/css/rich.css`
@@ -209,3 +210,13 @@ Rules for every stream: no git commands; no edits outside your files (ask the co
 keep exports of existing modules stable; write files atomically (temp + rename) for files
 Vite serves; Vietnamese UI copy; run `npx vitest run` before finishing; never touch the
 hosted Supabase project (`.env`); local stack: `npx supabase status -o json`.
+
+## Implementation status (2026-10-09)
+
+Implemented by streams A1–A7, verified by A8 (real Chromium E2E, 142 cases, local stack).
+Notes from integration:
+- Toolbar: one row on desktop with a ResizeObserver "⋯ Thêm" overflow; block styles in the "Kiểu chữ" menu; phones keep a horizontally scrolling bar.
+- Shortcuts in the WYSIWYG editor: Ctrl+E inline code, Ctrl+K link (the global palette ignores Ctrl+K inside `.rt[contenteditable]`).
+- `rt:request-image` is cancelable; the page handles it (keeps the user activation) and `images.js` skips when `defaultPrevented`.
+- Pasting Markdown with another note's `nm-media:` paths copies the files (`transformPastedMarkdown` → `noteMedia.copyNoteMedia`).
+- Exported .md keeps `nm-media:` links (they only resolve inside the app).
