@@ -51,10 +51,12 @@ jobs:
         with:
           version: 2.120.0
 
-      # Dựng Postgres + Auth local và áp dụng TOÀN BỘ supabase/migrations theo thứ tự.
+      # Dựng Postgres + Auth + REST local và áp dụng TOÀN BỘ supabase/migrations theo thứ tự.
       # Migration lỗi → job đỏ, không bao giờ tới production.
-      - name: Apply migrations on a fresh local database
-        run: supabase db start
+      # Phải là `supabase start` ngay từ đầu: nếu chạy `db start` trước thì `start` sau đó
+      # coi stack là "đã chạy" và không bật Auth/REST/API gateway.
+      - name: Apply migrations on a fresh local stack (Postgres + Auth + REST)
+        run: supabase start -x studio,imgproxy,vector,logflare,edge-runtime,realtime,storage-api,mailpit,postgres-meta,supavisor
 
       - name: Lint database schema
         run: supabase db lint --fail-on error
@@ -67,13 +69,16 @@ jobs:
 
       - run: npm ci
 
-      - name: Start Auth + REST on top of the local database
-        run: supabase start -x studio,imgproxy,vector,logflare,edge-runtime,realtime,storage-api,mailpit,postgres-meta,supavisor
-
-      # Chỉ để chẩn đoán: in tên các khoá mà `supabase status` trả về (không in giá trị).
-      - name: Show local Supabase status keys
-        continue-on-error: true
-        run: supabase status -o json 2>&1 | grep -o '"[A-Z_]*":' || true
+      - name: Wait for local API gateway
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:54321/rest/v1/ || true)
+            [ "$code" != "000" ] && exit 0
+            sleep 2
+          done
+          echo "::error::Local Supabase API (127.0.0.1:54321) is not responding"
+          supabase status || true
+          exit 1
 
       # Stack local dùng JWT secret mặc định (config.toml không đổi) → URL và anon/service key
       # là giá trị demo công khai của Supabase CLI, không phải secret. Đặt thẳng để test không
