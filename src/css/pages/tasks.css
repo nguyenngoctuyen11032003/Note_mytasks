@@ -357,7 +357,6 @@ html.tk-drawer-lock { overflow: hidden; }
   background: var(--surface-2);
 }
 .tk-drawer__crumb { display: flex; align-items: center; gap: var(--s-3); min-width: 0; }
-.tk-drawer__num { color: var(--accent); }
 .tk-drawer__saved { font-family: var(--font-mono); font-size: 10px; color: var(--ink-4); opacity: 0; transition: opacity var(--t-med); white-space: nowrap; }
 .tk-drawer__saved.is-visible { opacity: 1; }
 .tk-drawer__saved.is-error { color: var(--danger); }
@@ -422,7 +421,6 @@ html.tk-drawer-lock { overflow: hidden; }
 .tk-dsec__head { display: flex; align-items: center; gap: var(--s-3); margin-bottom: var(--s-3); padding-bottom: var(--s-2); border-bottom: 1px solid var(--ink); position: relative; }
 .tk-dsec__head::after { content: ''; position: absolute; left: 0; right: 0; bottom: -4px; height: 1px; background: var(--rule); }
 .tk-dsec__head h3 { display: flex; align-items: baseline; gap: var(--s-2); font-family: var(--font-display); font-size: var(--fs-lg); font-weight: 500; margin-right: auto; }
-.tk-dsec__num { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--accent); letter-spacing: 0.1em; }
 .tk-check-sum { font-size: var(--fs-xs); color: var(--ink-3); }
 .tk-check-bar { height: 3px; background: var(--paper-2); border-radius: 2px; overflow: hidden; margin-bottom: var(--s-3); }
 .tk-check-bar span { display: block; height: 100%; background: var(--success); transition: width var(--t-slow) var(--ease); }

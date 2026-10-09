@@ -177,6 +177,13 @@ export default async function tasksPage(root, { query }) {
 
   const $ = (s) => root.querySelector(s);
   const qaInput = $('.tk-qa__input');
+  // Phones: the long example placeholder gets clipped — use a shorter one below 600px.
+  const mqNarrow = window.matchMedia('(max-width: 599px)');
+  const QA_PH_LONG = qaInput.placeholder;
+  const syncQaPlaceholder = () => { qaInput.placeholder = mqNarrow.matches ? 'Thêm việc… vd: Gọi khách 9h mai' : QA_PH_LONG; };
+  syncQaPlaceholder();
+  mqNarrow.addEventListener?.('change', syncQaPlaceholder);
+  disposers.push(() => mqNarrow.removeEventListener?.('change', syncQaPlaceholder));
 
   /* ================================================================ */
   /* Filtering / grouping                                              */
@@ -1011,12 +1018,12 @@ export default async function tasksPage(root, { query }) {
       body: html`
         <div class="tk-help">
           <section>
-            <h3 class="tk-help__h"><span class="mono">01</span> Nhập nhanh</h3>
+            <h3 class="tk-help__h">Nhập nhanh</h3>
             <p class="muted tk-help__ex">Ví dụ: <span class="mono">${QA_EXAMPLE}</span></p>
             <dl class="tk-help__dl">${syntax.map(([k, v]) => html`<dt class="mono">${k}</dt><dd>${v}</dd>`)}</dl>
           </section>
           <section>
-            <h3 class="tk-help__h"><span class="mono">02</span> Phím tắt</h3>
+            <h3 class="tk-help__h">Phím tắt</h3>
             <dl class="tk-help__dl tk-help__dl--keys">${keys.map(([k, v]) => html`<dt>${k.split(' / ').map((x, i) => html`${i ? ' / ' : ''}<kbd>${x}</kbd>`)}</dt><dd>${v}</dd>`)}</dl>
           </section>
         </div>`,

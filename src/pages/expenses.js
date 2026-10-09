@@ -98,12 +98,12 @@ export default async function expensesPage(root, { query }) {
       <article class="sheet span-4" data-c4>${sheetHead('E.4', 'Theo thứ trong tuần')}<div class="sheet__body">${loadingBlock(220)}</div></article>
       <article class="sheet span-3" data-c5>${sheetHead('E.5', 'Thanh toán')}${loadingRows(4)}</article>
     </section>
-    <h2 class="section-title"><span class="eyebrow">§ 06.B</span>Ngân sách &amp; cảnh báo</h2>
+    <h2 class="section-title">Ngân sách &amp; cảnh báo</h2>
     <section class="grid grid-12">
       <article class="sheet span-7" data-budget>${sheetHead('E.6', 'Ngân sách')}${loadingRows(5)}</article>
       <article class="sheet span-5" data-anom>${sheetHead('E.7', 'Khoản chi bất thường')}${loadingRows(4)}</article>
     </section>
-    <h2 class="section-title"><span class="eyebrow">§ 06.C</span>Sổ chi tiết</h2>
+    <h2 class="section-title">Sổ chi tiết</h2>
     <div class="toolbar xp-filters">
       <div class="input-group">${icon('search')}<input class="input" type="search" placeholder="Tìm mô tả, ghi chú…" value="${f.q}" data-f="q" aria-label="Tìm khoản chi" /></div>
       <select class="select" data-f="cat" aria-label="Lọc danh mục">${categoryOptions('expense', { all: 'Mọi danh mục', none: 'Chưa phân loại' }).map((o) => html`<option value="${o.value}" ${o.value === f.cat ? raw('selected') : ''}>${o.label}</option>`)}</select>
@@ -1204,6 +1204,11 @@ export default async function expensesPage(root, { query }) {
   if (query.m) syncQuery();
   await load({ full: true });
   if (query.new) { setQuery({ new: null }); openEntry(); }
+  // Deep link from dashboard / insights: '#/expenses?tab=budgets' → bring the budget sheet into view.
+  if (query.tab === 'budgets') {
+    setQuery({ tab: null });
+    requestAnimationFrame(() => $('[data-budget]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }
 
   return () => {
     alive = false;

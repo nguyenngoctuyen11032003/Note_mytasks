@@ -55,7 +55,7 @@ export default async function timePage(root, { query }) {
     <section class="tm-stats" data-stats>${statTileSkeleton(4)}</section>
 
     <div class="tm-period">
-      <h2 class="section-title tm-period__title"><span class="eyebrow">§ 04.2</span>Nhật ký <em>thời gian</em></h2>
+      <h2 class="section-title tm-period__title">Nhật ký <em>thời gian</em></h2>
       <div class="tm-period__ctrl">
         <div class="segmented" role="group" aria-label="Kỳ xem">
           <button type="button" data-period="week" aria-pressed="${period === 'week'}">Tuần</button>
@@ -241,7 +241,6 @@ export default async function timePage(root, { query }) {
       <div class="tm-hero__dial">${dial()}</div>
       <div class="tm-hero__panel">
         <div class="tm-hero__top">
-          <span class="sheet__num">T.1</span>
           <div class="segmented" role="group" aria-label="Chế độ đồng hồ">
             <button type="button" data-mode="stopwatch" aria-pressed="${v.mode === 'stopwatch'}">${icon('timer')} Bấm giờ</button>
             <button type="button" data-mode="pomodoro" aria-pressed="${v.mode === 'pomodoro'}">${icon('hourglass')} Pomodoro</button>
@@ -380,7 +379,7 @@ export default async function timePage(root, { query }) {
     focusEl = fragment(html`
       <div class="tm-focus" role="dialog" aria-modal="true" aria-label="Chế độ tập trung" tabindex="-1">
         <header class="tm-focus__top">
-          <span class="eyebrow">§ Chế độ tập trung</span>
+          <span class="eyebrow">Chế độ tập trung</span>
           <span data-focus-badge></span>
           <span class="grow"></span>
           <span class="tm-focus__hint">Esc để thoát · Space tạm dừng</span>

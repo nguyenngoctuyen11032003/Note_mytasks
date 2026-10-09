@@ -127,7 +127,7 @@ function staticCommands() {
     group: 'Đi tới',
     icon: n.icon,
     label: n.label,
-    sub: `§ ${n.num}`,
+    sub: null,
     keywords: `${n.path.slice(1)} trang`,
     kbd: GO_BY_PATH[n.path] ? ['G', GO_BY_PATH[n.path]] : null,
     run: () => navigate(n.path),

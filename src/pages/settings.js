@@ -47,7 +47,11 @@ const SHORTCUTS = [
   { keys: [['G'], ['N']], label: 'Đi tới Ghi chú' },
   { keys: [['G'], ['T']], label: 'Đi tới Công việc' },
   { keys: [['G'], ['C']], label: 'Đi tới Lịch' },
+  { keys: [['G'], ['H']], label: 'Đi tới Thời gian' },
+  { keys: [['G'], ['K']], label: 'Đi tới Mục tiêu KPI' },
   { keys: [['G'], ['E']], label: 'Đi tới Chi tiêu' },
+  { keys: [['G'], ['S']], label: 'Đi tới Mua sắm' },
+  { keys: [['G'], ['R']], label: 'Đi tới Báo cáo' },
   { keys: [['?']], label: 'Mở bảng trợ giúp phím tắt' },
   { keys: [['Esc']], label: 'Đóng hộp thoại / menu đang mở' },
 ];
@@ -89,7 +93,7 @@ export default async function settingsPage(root) {
       ${pageHead({ num: '09', kicker: 'Cài đặt', title: 'Sắp đặt <em>góc làm việc</em>', lede: 'Hồ sơ, tuỳ chọn hiển thị, danh mục, bảo mật và sao lưu dữ liệu — tất cả ở một nơi.' })}
       <div class="st">
         <nav class="st-nav" aria-label="Mục cài đặt">
-          ${SECTIONS.map(([id, label, ic], i) => html`<a href="#${id}" data-jump="${id}"><span class="st-nav__num">${String(i + 1).padStart(2, '0')}</span>${icon(ic)}<span>${label}</span></a>`)}
+          ${SECTIONS.map(([id, label, ic], i) => html`<a href="#${id}" data-jump="${id}">${icon(ic)}<span>${label}</span></a>`)}
         </nav>
         <div class="st-body">
 
@@ -257,7 +261,7 @@ export default async function settingsPage(root) {
   }
 
   function head(num, id, title, text) {
-    return html`<header class="st-head"><span class="st-head__num">${num}</span><div><h2 id="${id}">${title}</h2><p>${text}</p></div></header>`;
+    return html`<header class="st-head"><div><h2 id="${id}">${title}</h2><p>${text}</p></div></header>`;
   }
 
   function watchSections() {

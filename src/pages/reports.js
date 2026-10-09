@@ -797,7 +797,6 @@ export default async function reportsPage(root, { query }) {
 function secHead(n, title, sub, key, id) {
   return html`
     <header class="rp-sec__head">
-      <span class="rp-sec__num">§ ${n}</span>
       <div class="rp-sec__titles"><h2 id="${id}">${title}</h2><p>${sub}</p></div>
       <button type="button" class="btn btn--sm btn--ghost rp-noprint" data-csv="${key}" aria-label="Xuất CSV phần ${title}">${icon('download')} CSV</button>
     </header>`;

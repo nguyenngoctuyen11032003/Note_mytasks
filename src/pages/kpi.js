@@ -113,7 +113,7 @@ export default async function kpiPage(root, { query }) {
     mount(box, html`
       <section class="sheet sheet--ticked kp-strip" aria-label="Tổng quan KPI">
         <div class="kp-strip__lead">
-          <span class="eyebrow">§ 05.1 · Tổng quan</span>
+          <span class="eyebrow">Tổng quan</span>
           <p class="kp-strip__headline"><strong>${good}</strong><span class="kp-strip__of">/${active.length}</span><span class="kp-strip__cap">KPI đúng tiến độ${counts.achieved ? ` (${counts.achieved} đã đạt)` : ''}</span></p>
           <p class="kp-strip__note">${risky
             ? html`<span class="danger-text">${icon('alert')} ${risky} KPI có rủi ro hoặc chệch hướng</span> — ưu tiên cập nhật & tăng tốc.`

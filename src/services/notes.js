@@ -4,7 +4,7 @@ import {
   db, run, invalid, pick, requireId, requireNonEmpty, vText, vEnum, vColor, vUuidOrNull, vInstant,
   searchOr, orValue,
 } from './errors.js';
-import { normalizeTags } from './tasks.js';
+import { normalizeTags, tagFilterValue } from './tasks.js';
 
 export const NOTE_KINDS = ['note', 'checklist', 'journal', 'meeting'];
 export const NOTE_COLS = 'id, title, content, notebook, tags, color, pinned, archived, trashed_at, task_id, kind, created_at, updated_at';
@@ -59,7 +59,7 @@ export async function listNotes({ search, notebook, tag, kind, pinned, archived 
     if (archived != null) q = q.eq('archived', Boolean(archived));
   }
   if (notebook) q = q.eq('notebook', String(notebook));
-  if (tag) q = q.contains('tags', [String(tag).trim()]);
+  if (tag) q = q.contains('tags', tagFilterValue(tag));
   if (kind) q = q.eq('kind', vEnum(kind, 'kind', NOTE_KINDS, { label: 'Loại ghi chú' }));
   if (pinned != null) q = q.eq('pinned', Boolean(pinned));
 

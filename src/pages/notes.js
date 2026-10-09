@@ -106,10 +106,33 @@ export default async function notesPage(root, { query }) {
     const top = ws.getBoundingClientRect().top + window.scrollY;
     ws.style.setProperty('--nb-h', Math.max(520, Math.floor(window.innerHeight - top - 20)) + 'px');
   }
+  // Phones: opening the editor pushes a same-URL history entry so the browser
+  // Back button returns to the list instead of leaving the page. pushState with
+  // an unchanged hash fires no hashchange, so the hash router is unaffected.
+  let navPushed = false;
+  let ignorePop = false;
   function showPane(p) {
     ws.dataset.pane = p;
     if (isPhone()) window.scrollTo({ top: 0 });
+    if (p === 'editor' && isPhone() && !navPushed) {
+      history.pushState({ nbEditor: true }, '', location.href);
+      navPushed = true;
+    } else if (p === 'list' && navPushed) {
+      navPushed = false; // closed in-app (delete, empty trash…) → drop the extra entry
+      ignorePop = true;
+      history.back();
+    }
   }
+  const onPopState = async () => {
+    if (ignorePop) { ignorePop = false; setQuery({ id: cur?.id || null }); return; }
+    if (!navPushed || !root.isConnected || !location.hash.startsWith('#/notes')) return;
+    navPushed = false;
+    if (ws.dataset.pane !== 'editor') return;
+    await closeEditor();
+    if (cur) showPane('editor'); // user kept unsaved changes → re-arm Back
+  };
+  window.addEventListener('popstate', onPopState);
+  disposers.push(() => window.removeEventListener('popstate', onPopState));
   const openNav = () => { ws.dataset.nav = 'open'; $('.nb-side__item[aria-current="true"], .nb-side__item')?.focus(); };
   const closeNav = () => { ws.dataset.nav = 'closed'; };
 
@@ -192,7 +215,7 @@ export default async function notesPage(root, { query }) {
     const tags = overview?.tags || [];
     mount($('[data-side]'), html`
       <div class="nb-side__head">
-        <span class="eyebrow">§ Thư viện</span>
+        <span class="eyebrow">Thư viện</span>
         <button type="button" class="icon-btn icon-btn--sm nb-side__close" data-act="nav-close" aria-label="Đóng thư viện">${icon('x')}</button>
       </div>
       <nav class="nb-side__nav" aria-label="Chế độ xem">
@@ -203,7 +226,7 @@ export default async function notesPage(root, { query }) {
           </button>`)}
       </nav>
       <div class="nb-side__sect">
-        <span class="eyebrow">§ Sổ ghi chú</span>
+        <span class="eyebrow">Sổ ghi chú</span>
         <button type="button" class="icon-btn icon-btn--sm" data-act="new-notebook" aria-label="Tạo sổ mới" title="Tạo sổ mới">${icon('plus')}</button>
       </div>
       <nav class="nb-side__nav" aria-label="Sổ ghi chú">
@@ -214,7 +237,7 @@ export default async function notesPage(root, { query }) {
             </button>`)
           : html`<p class="nb-side__hint">Gom ghi chú theo dự án, khách hàng hay chủ đề.</p>`}
       </nav>
-      <div class="nb-side__sect"><span class="eyebrow">§ Thẻ</span></div>
+      <div class="nb-side__sect"><span class="eyebrow">Thẻ</span></div>
       <div class="nb-side__tags">
         ${tags.length
           ? tags.slice(0, 40).map((t) => html`<button type="button" class="tag ${f.view === 'tag' && f.tag === t.tag ? 'is-on' : ''}" data-tagf="${t.tag}" aria-pressed="${f.view === 'tag' && f.tag === t.tag}">${t.tag}<span class="nb-side__tagn">${t.count}</span></button>`)
@@ -702,7 +725,7 @@ export default async function notesPage(root, { query }) {
   function openTemplates(extra = {}) {
     const tpls = E.noteTemplates();
     const dlg = openModal({
-      eyebrow: '§ Mẫu ghi chú',
+      eyebrow: 'Mẫu ghi chú',
       title: 'Bắt đầu từ đâu?',
       size: 'wide',
       onSubmit: null,
@@ -712,7 +735,7 @@ export default async function notesPage(root, { query }) {
             const outline = E.templateOutline(t.content);
             return html`
               <button type="button" class="nb-tpl" data-tpl="${t.id}">
-                <span class="nb-tpl__top"><span class="nb-tpl__num">${String(i + 1).padStart(2, '0')}</span>${icon(t.icon)}</span>
+                <span class="nb-tpl__top">${icon(t.icon)}</span>
                 <span class="nb-tpl__name">${t.label}</span>
                 <span class="nb-tpl__desc">${t.desc}</span>
                 ${outline.length ? html`<span class="nb-tpl__outline">${outline.map((o) => html`<span>${o}</span>`)}</span>` : ''}
@@ -932,7 +955,7 @@ export default async function notesPage(root, { query }) {
     const linked = cur.task_id && taskCache.get(cur.task_id);
     if (linked && !tasks.some((t) => t.id === linked.id)) tasks.unshift(linked);
     openModal({
-      eyebrow: '§ Liên kết',
+      eyebrow: 'Liên kết',
       title: 'Gắn ghi chú với công việc',
       submitLabel: 'Liên kết',
       body: html`
@@ -982,7 +1005,7 @@ export default async function notesPage(root, { query }) {
     const items = E.openChecklistItems(cur.content);
     if (!items.length) { toast.info('Không có mục checklist nào chưa hoàn thành.'); return; }
     const ok = await confirmDialog({
-      eyebrow: '§ Công việc',
+      eyebrow: 'Công việc',
       title: `Tạo ${num(items.length)} công việc?`,
       message: `Mỗi mục “- [ ]” chưa xong sẽ thành một công việc${cur.tags?.length ? ' (kèm thẻ của ghi chú)' : ''}.`,
       confirmLabel: 'Tạo công việc',
@@ -1035,7 +1058,7 @@ export default async function notesPage(root, { query }) {
   /* ---------- notebooks ---------- */
   function newNotebook() {
     openModal({
-      eyebrow: '§ Sổ ghi chú',
+      eyebrow: 'Sổ ghi chú',
       title: 'Tạo sổ mới',
       size: 'narrow',
       submitLabel: 'Tạo & viết ghi chú đầu tiên',
@@ -1064,7 +1087,7 @@ export default async function notesPage(root, { query }) {
 
   function renameNotebookDialog(name) {
     openModal({
-      eyebrow: '§ Sổ ghi chú',
+      eyebrow: 'Sổ ghi chú',
       title: 'Đổi tên sổ',
       size: 'narrow',
       body: html`${field({ label: 'Tên mới', name: 'name', control: input('name', name, 'maxlength="60" autofocus autocomplete="off"') })}`,
@@ -1144,7 +1167,7 @@ export default async function notesPage(root, { query }) {
         store.set(LS_LAYOUT, f.layout);
         ws.dataset.layout = f.layout;
         return renderList();
-      case 'back': return closeEditor();
+      case 'back': if (navPushed) { history.back(); return; } return closeEditor();
       case 'retry': return loadList();
     }
     if (!cur) return;
@@ -1164,8 +1187,7 @@ export default async function notesPage(root, { query }) {
         updateItem(cur);
         return;
       case 'open-task': {
-        const t = taskCache.get(cur.task_id);
-        return navigate('/tasks', { q: t?.title || null, scope: t && !OPEN_STATUSES.includes(t.status) ? 'all' : null });
+        return navigate('/tasks', { id: cur.task_id });
       }
     }
   }));

@@ -26,7 +26,9 @@ const NS = 'http://www.w3.org/2000/svg';
 const supported = typeof window !== 'undefined'
   && !!window.chrome
   && typeof CSS !== 'undefined' && CSS.supports('backdrop-filter', 'url(#a)')
-  && !matchMedia('(prefers-reduced-transparency: reduce)').matches;
+  && !matchMedia('(prefers-reduced-transparency: reduce)').matches
+  // Refraction is a desktop flourish; phones keep scrolling cheap.
+  && !matchMedia('(pointer: coarse), (max-width: 960px)').matches;
 
 let svgRoot = null;
 const cache = new Map(); // key -> filter id

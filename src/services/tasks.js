@@ -61,7 +61,7 @@ const normalize = (rows) => numify(rows, ['estimated_minutes', 'actual_minutes']
 // supabase-js joins array values unquoted (`cs.{a,b}`), so a tag containing
 // `, " { } \` or spelled NULL would be mis-parsed by Postgres (wrong matches or
 // "malformed array literal"). Such tags are sent as a quoted array literal.
-function tagFilterValue(tag) {
+export function tagFilterValue(tag) {
   const t = String(tag).trim();
   if (/[,"{}\\]/.test(t) || /^null$/i.test(t)) return `{"${t.replace(/[\\"]/g, (c) => '\\' + c)}"}`;
   return [t];

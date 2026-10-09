@@ -130,7 +130,7 @@ export default async function dashboard(root) {
     <header class="page-head dash-head">
       <div>
         <div class="page-head__eyebrow">
-          <span class="eyebrow">§ 01</span><span class="eyebrow">Tổng quan</span>
+          <span class="eyebrow">Tổng quan</span>
           <span class="eyebrow dash-head__stamp">${day(t0, 'long')} · Tuần ${isoWeek(t0)}</span>
         </div>
         <h1>${greeting()}, <em>${store.displayName()}</em>.</h1>

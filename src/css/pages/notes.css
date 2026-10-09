@@ -429,9 +429,8 @@
 }
 .nb-tpl:hover, .nb-tpl:focus-visible { border-color: var(--ink-3); box-shadow: var(--shadow-2); transform: translateY(-1px); }
 .nb-tpl:first-child { background-color: var(--surface-2); background-image: linear-gradient(var(--grid-line) 1px, transparent 1px), linear-gradient(90deg, var(--grid-line) 1px, transparent 1px); background-size: 16px 16px; }
-.nb-tpl__top { display: flex; align-items: center; justify-content: space-between; width: 100%; color: var(--ink-3); }
+.nb-tpl__top { display: flex; align-items: center; justify-content: flex-start; width: 100%; color: var(--ink-3); }
 .nb-tpl__top svg { width: 18px; height: 18px; }
-.nb-tpl__num { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; color: var(--accent); }
 .nb-tpl__name { margin-top: 4px; font-family: var(--font-display); font-size: var(--fs-lg); line-height: 1.2; color: var(--ink); }
 .nb-tpl__desc { font-size: var(--fs-xs); line-height: 1.45; color: var(--ink-3); }
 .nb-tpl__outline { display: flex; flex-wrap: wrap; gap: 4px; margin-top: auto; padding-top: var(--s-2); }

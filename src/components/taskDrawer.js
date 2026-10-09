@@ -118,7 +118,7 @@ export function openTaskDrawer({ task, onSaved, onDeleted, onClose, focus } = {}
     <aside class="tk-drawer__panel" role="dialog" aria-modal="true" aria-labelledby="tkd-title" tabindex="-1">
       <div class="tk-drawer__grab" data-grab aria-hidden="true"><span></span></div>
       <header class="tk-drawer__head" data-grab>
-        <div class="tk-drawer__crumb"><span class="eyebrow tk-drawer__num">§ 03</span><span class="eyebrow">Chi tiết công việc</span><span class="tk-drawer__saved" data-saved aria-live="polite"></span></div>
+        <div class="tk-drawer__crumb"><span class="eyebrow">Chi tiết công việc</span><span class="tk-drawer__saved" data-saved aria-live="polite"></span></div>
         <div class="tk-drawer__tools">
           <button type="button" class="icon-btn" data-act="more" aria-label="Thêm thao tác" aria-haspopup="menu">${icon('more')}</button>
           <button type="button" class="icon-btn" data-close aria-label="Đóng (Esc)">${icon('x')}</button>
@@ -222,7 +222,7 @@ export function openTaskDrawer({ task, onSaved, onDeleted, onClose, focus } = {}
   function paintDesc() {
     const sec = $('[data-sec="desc"]');
     const stats = checklistStats(t.description || '');
-    const head = html`<div class="tk-dsec__head"><h3><span class="tk-dsec__num">A</span> Mô tả</h3>
+    const head = html`<div class="tk-dsec__head"><h3>Mô tả</h3>
       ${stats.total ? html`<span class="tk-check-sum mono">${stats.done}/${stats.total} việc con</span>` : ''}
       ${!editingDesc ? html`<button type="button" class="btn btn--ghost btn--sm" data-act="edit-desc">${icon('edit')} ${t.description ? 'Sửa' : 'Thêm'}</button>` : ''}</div>`;
     if (editingDesc) {
@@ -252,7 +252,7 @@ export function openTaskDrawer({ task, onSaved, onDeleted, onClose, focus } = {}
     const other = store.get().runningEntry && !running();
     const done = isDone() || t.status === 'cancelled';
     sec.innerHTML = String(html`
-      <div class="tk-dsec__head"><h3><span class="tk-dsec__num">B</span> Thời gian</h3><a class="btn btn--ghost btn--sm" href="#/time">Nhật ký ${icon('arrowRight')}</a></div>
+      <div class="tk-dsec__head"><h3>Thời gian</h3><a class="btn btn--ghost btn--sm" href="#/time">Nhật ký ${icon('arrowRight')}</a></div>
       <div class="tk-time">
         <div class="tk-time__fig"><span class="eyebrow">Thực tế</span><strong class="mono" data-actual>${minutes(actual)}</strong></div>
         <div class="tk-time__fig"><span class="eyebrow">Ước tính</span><strong class="mono">${est ? minutes(est) : '—'}</strong></div>
@@ -292,8 +292,8 @@ export function openTaskDrawer({ task, onSaved, onDeleted, onClose, focus } = {}
 
   function paintLinks() {
     $('[data-sec="links"]').innerHTML = String(html`
-      <div class="tk-dsec__head"><h3><span class="tk-dsec__num">C</span> Liên quan</h3></div>
-      <a class="tk-linkcard" href="#/notes?new=1">
+      <div class="tk-dsec__head"><h3>Liên quan</h3></div>
+      <a class="tk-linkcard" href="#/notes?new=1&task=${encodeURIComponent(t.id)}">
         <span class="tk-linkcard__icon">${icon('note')}</span>
         <span><strong>Ghi chú liên quan</strong><small>Mở một ghi chú mới để ghi lại ý tưởng, biên bản cho việc này.</small></span>
         ${icon('arrowRight')}

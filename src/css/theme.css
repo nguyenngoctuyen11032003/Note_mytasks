@@ -426,3 +426,107 @@ kbd { font-family: var(--font-sans); border-radius: 6px; border: 1px solid var(-
 .kp-card { overflow: hidden; border-top: 0; box-shadow: var(--glass-edge), inset 0 2px 0 var(--c, transparent); }
 /* Headings: one colour (no two-tone emphasis). */
 .content h1 em, .page-head h1 em, .auth__card h1 em { font-style: normal !important; color: inherit !important; }
+
+/* Auth plate: beat layout.css's legacy near-black rules (they use :not()). */
+:root:not([data-theme='light']) .auth__plate, :root[data-theme] .auth__plate, .auth .auth__plate {
+  background-color: var(--paper-2); background-image: var(--ambient); color: var(--ink);
+}
+.auth__plate .auth__drawing { opacity: 0.28; }
+.auth__side { background: transparent; }
+
+/* ---------- QA round 2 ---------- */
+/* Reports: no section numbers; title column takes the freed space. */
+.rp-sec__num { display: none; }
+.rp-sec__head { grid-template-columns: minmax(0, 1fr) auto; }
+.rp-sec__titles h2 { font-weight: 600; letter-spacing: -0.025em; }
+
+/* Highlight tile: same dark glass as its neighbours, lifted by a caramel rim
+   and a caramel figure — never a lone cream card on the espresso page. */
+.stat--accent {
+  background: linear-gradient(160deg, color-mix(in srgb, var(--accent) 16%, transparent), var(--card) 60%);
+  color: var(--ink);
+  box-shadow: var(--glass-edge), inset 0 0 0 1px color-mix(in srgb, var(--accent) 34%, transparent);
+}
+.stat--accent .stat__value { color: var(--accent-ink); }
+.stat--accent .eyebrow, .stat--accent .stat__meta, .stat--accent .stat__value small { color: var(--muted); }
+.stat--accent .stat__icon { background: var(--accent-soft); color: var(--accent-ink); box-shadow: none; }
+:root[data-theme='light'] .stat--accent .stat__value { color: var(--accent); }
+
+/* Typography: no orphans in headlines and lead sentences. */
+h1, h2, h3, .page-head h1, .empty__title { text-wrap: balance; }
+p, .page-head__lede, .stat__meta, .empty__text { text-wrap: pretty; }
+
+/* =====================================================================
+   Performance layer — keep scrolling at 60fps, especially on phones.
+   - Light pools live on ONE fixed, composited layer (background-attachment:
+     fixed repaints on every scroll frame and is ignored by iOS anyway).
+   - backdrop-filter is expensive per element and per scroll frame: buttons
+     and sticky headers get translucent fills instead; only the chrome
+     (topbar, sidebar, phone tab bar, dialogs, menus) keeps real blur.
+   ===================================================================== */
+body { background-image: none; background-attachment: scroll; }
+body::before {
+  content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background: var(--ambient);
+  transform: translateZ(0);
+}
+.btn, .segmented, .timer-chip { -webkit-backdrop-filter: none; backdrop-filter: none; }
+.group-head, .tk-group__head {
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+  background: color-mix(in srgb, var(--paper) 94%, var(--surface)) !important;
+}
+.content { contain: layout style; }
+.sheet, .stat, .card-task, .kp-card { contain: paint; }
+.task-row, .entry-row, .expense-row { content-visibility: auto; contain-intrinsic-size: auto 64px; }
+
+@media (max-width: 960px), (pointer: coarse) {
+  /* Phones: blur only on the chrome; everything else is a flat fill. */
+  .sidebar { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--paper-2); }
+  .topbar { -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); background: color-mix(in srgb, var(--paper) 82%, transparent); }
+  .notes .nb-pane, .nb-toolbar, .xp-bar, .settings__nav { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+  .dialog { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--surface); }
+  .dialog::backdrop { -webkit-backdrop-filter: none; backdrop-filter: none; background: color-mix(in srgb, var(--surface-sunk) 72%, transparent); }
+  .menu { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--surface); }
+  /* Shorter, lighter entrance on phones (no per-card cascade). */
+  .content.is-entering .grid > * { animation: none; }
+  .content.is-entering > * { animation-duration: 0.45s; }
+  .content.is-entering > *:nth-child(n+3) { animation-delay: 0.08s; }
+  /* Tap feel: no 300ms delay, no grey flash. */
+  a, button, [role='button'], .btn, .icon-btn, .tick, .nav__item { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+}
+/* The fixed light layer sits at z-index:-1, so body must not paint over it. */
+html { background: var(--paper); }
+body { background: transparent; }
+
+/* =====================================================================
+   Phone fit (≤ 600px) — checked at real 360 / 390px widths.
+   ===================================================================== */
+@media (max-width: 600px) {
+  /* Bottom tab bar: full labels ("Công việc") fit at 360px. */
+  .tabbar__tab span { font-size: 10.5px; letter-spacing: -0.01em; padding: 0; text-overflow: clip; }
+  .tabbar { background: color-mix(in srgb, var(--paper) 86%, transparent); border-top: 1px solid var(--rule); }
+
+  /* Tasks ledger: five compact columns, labels may wrap, nothing cut. */
+  .tk-ledger__item { padding: 6px 6px 10px; min-height: 58px; }
+  .tk-ledger__item:first-child { padding-left: 0; }
+  .tk-ledger__n { font-size: 1.375rem; }
+  .tk-ledger__l { font-size: 11px !important; line-height: 1.25; white-space: normal; }
+
+  /* Headline sizes tuned for one-hand reading. */
+  .page-head { margin-bottom: var(--s-5); gap: var(--s-4); }
+  .page-head h1 { font-size: 1.875rem; }
+  .page-head__lede { font-size: var(--fs-sm); }
+  .sheet__head { padding: var(--s-3) var(--s-4) var(--s-3) var(--s-5); min-height: 52px; }
+  .sheet__body { padding: var(--s-4) var(--s-5); }
+  .stat__value { font-size: 1.5rem; }
+
+  /* Touch targets ≥ 40px; inputs 16px so iOS never zooms on focus. */
+  .btn { min-height: 40px; }
+  .btn--sm { min-height: 34px; }
+  .input, .select, .textarea, .tag-input input, .xp-entry__amt { font-size: 16px; }
+  .icon-btn--sm { width: 34px; height: 34px; }
+}
+/* Keyboard-shortcut affordances are noise on touch devices. */
+@media (pointer: coarse) {
+  .page-head [data-act='help'], .btn kbd, .topbar kbd { display: none !important; }
+}

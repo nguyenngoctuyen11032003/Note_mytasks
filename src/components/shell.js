@@ -7,7 +7,7 @@ import * as store from '../core/store.js';
 import { navigate } from '../core/router.js';
 import { initials, clock, day } from '../utils/format.js';
 import { today } from '../utils/date.js';
-import { onTick, sessionSeconds, pausedSession } from './timer.js';
+import { onTick, onPomodoro, pomodoro, formatCountdown, sessionSeconds, pausedSession } from './timer.js';
 import { popMenu } from './ui.js';
 import { applyTheme, currentThemePref, onThemeChange } from './theme.js';
 
@@ -27,14 +27,14 @@ export const NAV = [
   { path: '/settings', num: '10', label: 'Cài đặt', icon: 'settings' },
 ];
 
-/** Bottom tab bar (phones): two tabs · quick-add · three tabs. */
+/** Bottom tab bar (phones): two tabs · quick-add · one tab + "Thêm" (symmetric 2 + FAB + 2).
+ *  Chi tiêu & the rest stay one tap away via the FAB menu and the "Thêm" drawer. */
 const TABS_LEFT = [
   { path: '/dashboard', label: 'Tổng quan', icon: 'dashboard' },
-  { path: '/notes', label: 'Ghi chú', icon: 'note' },
+  { path: '/tasks', label: 'Việc', icon: 'tasks' }, // short: 'Công việc' collides at 360px
 ];
 const TABS_RIGHT = [
-  { path: '/tasks', label: 'Công việc', icon: 'tasks' },
-  { path: '/expenses', label: 'Chi tiêu', icon: 'wallet' },
+  { path: '/notes', label: 'Ghi chú', icon: 'note' },
 ];
 
 const RAIL_KEY = 'nm.sidebar';
@@ -64,7 +64,7 @@ export function mountShell(app, { onSignOut, onQuickAdd, onSearch }) {
         <nav class="nav" aria-label="Các trang">
           ${NAV.map((n) => n.group
             ? html`<div class="nav__group"><span>${n.group}</span></div>`
-            : html`<a class="nav__item" href="#${n.path}" data-path="${n.path}" data-tip="${n.label}"><span class="nav__num">${n.num}</span>${icon(n.icon)}<span class="nav__label">${n.label}</span><span data-badge="${n.path}"></span></a>`)}
+            : html`<a class="nav__item" href="#${n.path}" data-path="${n.path}" data-tip="${n.label}">${icon(n.icon)}<span class="nav__label">${n.label}</span><span data-badge="${n.path}"></span></a>`)}
         </nav>
         <div class="sidebar__foot">
           <a class="usercard" href="#/settings" data-usercard></a>
@@ -116,6 +116,13 @@ export function mountShell(app, { onSignOut, onQuickAdd, onSearch }) {
     if ('runningEntry' in patch) renderTimer();
   }));
   unsubs.push(onTick(updateTimerText));
+  // Pomodoro breaks tick through onPomodoro (no running entry → onTick is silent).
+  let lastPhase = null;
+  unsubs.push(onPomodoro((pm) => {
+    const phase = pm.enabled ? pm.phase : 'idle';
+    if (phase !== lastPhase) { lastPhase = phase; renderTimer(); }
+    else if (phase === 'break') updateTimerText();
+  }));
   unsubs.push(onThemeChange(renderThemeIcon));
   unsubs.push(on(root, 'click', '[data-act]', (e, el) => {
     const act = el.dataset.act;
@@ -184,7 +191,7 @@ export function setActive(path) {
   });
   const inTabs = [...TABS_LEFT, ...TABS_RIGHT].some((t) => t.path === path);
   root.querySelector('.tabbar [data-act="open-nav"]')?.classList.toggle('is-current', !inTabs);
-  root.querySelector('[data-sect]').textContent = item ? `§ ${item.num}` : '';
+  root.querySelector('[data-sect]').textContent = '';
   root.querySelector('[data-title]').textContent = item?.label || '';
   root.classList.remove('tabbar-hidden');
   document.title = item ? `${item.label} · Note_mytasks` : 'Note_mytasks';
@@ -285,17 +292,30 @@ function cycleTheme(anchor) {
   ]);
 }
 
+/** Pomodoro break in progress (no running entry) → the chip shows "Nghỉ" + countdown. */
+function breakState() {
+  if (store.get().runningEntry) return null;
+  const pm = pomodoro();
+  return pm.enabled && pm.phase === 'break' ? pm : null;
+}
+
 function renderTimer() {
   const slot = root?.querySelector('[data-timer]');
   if (!slot) return;
   const run = store.get().runningEntry;
+  const brk = breakState();
   const paused = !run && pausedSession();
-  if (!run && !paused) { slot.innerHTML = ''; return; }
-  const label = run ? run.task?.title || run.description || 'Không gắn công việc' : `Tạm dừng · ${paused.title || 'Phiên tính giờ'}`;
+  if (!run && !paused && !brk) { slot.innerHTML = ''; return; }
+  const title = paused?.title || 'Phiên tính giờ';
+  const label = run ? run.task?.title || run.description || 'Không gắn công việc'
+    : brk ? `Nghỉ ${brk.breakKind === 'long' ? 'dài' : 'ngắn'}${paused ? ` · ${title}` : ''}`
+      : `Tạm dừng · ${title}`;
+  const state = run ? 'Đang tính giờ' : brk ? 'Đang nghỉ' : 'Đã tạm dừng';
+  const time = brk ? formatCountdown(brk.remaining) : clock(sessionSeconds());
   mount(slot, html`
-    <a class="timer-chip ${paused ? 'is-paused' : ''}" href="#/time" title="${label}" aria-label="${run ? 'Đang tính giờ' : 'Đã tạm dừng'}: ${label}">
+    <a class="timer-chip ${brk ? 'is-break' : paused ? 'is-paused' : ''}" href="#/time" title="${label}" aria-label="${state}: ${label}">
       <span class="timer-chip__pulse"></span>
-      <span class="timer-chip__time" data-timer-text>${clock(sessionSeconds())}</span>
+      <span class="timer-chip__time" data-timer-text>${time}</span>
       <span class="timer-chip__task truncate">${label}</span>
     </a>`);
 }
@@ -303,7 +323,9 @@ function renderTimer() {
 function updateTimerText() {
   if (!root) return;
   const el = root.querySelector('[data-timer-text]');
+  const brk = breakState();
   if (el && store.get().runningEntry) el.textContent = clock(sessionSeconds());
+  else if (el && brk && root.querySelector('.timer-chip.is-break')) el.textContent = formatCountdown(brk.remaining);
   else renderTimer();
 }
 

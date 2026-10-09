@@ -81,6 +81,9 @@
 .timer-chip.is-paused { background: var(--surface-sunk); color: var(--ink); }
 .timer-chip.is-paused .timer-chip__pulse { opacity: 0.4; }
 .timer-chip.is-paused .timer-chip__pulse::before { animation: none; }
+/* Pomodoro break: calm, success-tinted, slow breathing dot. */
+.timer-chip.is-break { background: color-mix(in srgb, var(--success) 16%, var(--surface)); color: var(--ink); }
+.timer-chip.is-break .timer-chip__pulse::before { background: var(--success); animation-duration: 3.2s; }
 
 /* ---------- Phone tab bar ---------- */
 .tabbar { display: none; }
