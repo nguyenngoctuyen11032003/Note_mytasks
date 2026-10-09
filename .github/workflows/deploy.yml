@@ -129,6 +129,9 @@ jobs:
   pages:
     name: Deploy to GitHub Pages
     needs: build
+    # Mặc định success() xét cả job gián tiếp: migrate bị skip (không có migration mới)
+    # sẽ kéo theo job này bị skip dù build đã thành công.
+    if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       pages: write
