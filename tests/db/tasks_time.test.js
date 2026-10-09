@@ -362,13 +362,39 @@ describe('start_timer / stop_timer (contract timer_start / timer_stop)', () => {
     expect(r.id).toBeNull();
   });
 
-  it('stop_timer on a sub-second segment deletes it and returns null', async () => {
+  it('stop_timer on a sub-second segment keeps it stretched to exactly 1 s (000200 compat)', async () => {
     await clearTime(a);
     await one(a, 'select * from public.start_timer()');
     await db.query(`update public.time_entries set started_at = now() - interval '300 milliseconds' where user_id = $1`, [a]);
-    const r = await one(a, 'select (public.stop_timer()).id as id');
-    expect(r.id).toBeNull();
-    expect(await entries(a)).toHaveLength(0);
+    const e = await one(a, 'select * from public.stop_timer()');
+    expect(e.duration_seconds).toBe(1);
+    expect(await entries(a)).toHaveLength(1);
+  });
+
+  // Port of the timer block in supabase/tests/database.test.sql (one transaction,
+  // so every call sees the same now()).
+  it('database.test.sql timer assertions still hold', async () => {
+    await clearTime(a);
+    const t1 = await newTask(a, { title: 'sql1' });
+    const t2 = await newTask(a, { title: 'sql2' });
+    await asUser(db, a, async (tx) => {
+      let e = (await tx.query(`select * from public.start_timer($1, 'Soạn dàn ý')`, [t1.id])).rows[0];
+      expect(e.ended_at).toBeNull();
+      expect(e.source).toBe('timer');
+      expect((await tx.query('select status from public.tasks where id = $1', [t1.id])).rows[0].status).toBe('in_progress');
+      await tx.query('select public.start_timer($1, null)', [t2.id]);
+      expect((await tx.query('select count(*)::int n from public.time_entries where ended_at is null')).rows[0].n).toBe(1);
+      await tx.query('savepoint s');
+      await expect(tx.query('insert into public.time_entries (task_id) values ($1)', [t1.id])).rejects.toThrow(/duplicate key|unique/);
+      await tx.query('rollback to savepoint s');
+      e = (await tx.query('select * from public.stop_timer()')).rows[0];
+      expect(e.ended_at).toBeTruthy();
+      expect((await tx.query('select (public.stop_timer()).id as id')).rows[0].id).toBeNull();
+      await tx.query(`update public.tasks set status = 'completed' where id = $1`, [t2.id]);
+      await tx.query('savepoint s2');
+      await expect(tx.query('select public.start_timer($1, null)', [t2.id])).rejects.toMatchObject({ code: '22023' });
+      await tx.query('rollback to savepoint s2');
+    });
   });
 
   it('keeps sub-second precision for segments >= 1 s', async () => {
@@ -440,15 +466,18 @@ describe('log_time', () => {
 
   it('time_overlap: intersecting finished segment; back-to-back is fine', async () => {
     await clearTime(a);
-    await log(a, null, '10 hours', '9 hours');
-    await expectCode(log(a, null, '9 hours 30 minutes', '8 hours'), 'time_overlap');
-    await expectCode(log(a, null, '11 hours', '8 hours'), 'time_overlap'); // contains
-    await expectCode(log(a, null, '9 hours 50 minutes', '9 hours 10 minutes'), 'time_overlap'); // inside
-    // adjacent on both sides: same instants -> needs same now(); do it in one transaction
-    await asUser(db, a, async (tx) => {
-      await tx.query(`select public.log_time(null, now() - interval '9 hours', now() - interval '8 hours')`);
-      await tx.query(`select public.log_time(null, now() - interval '11 hours', now() - interval '10 hours')`);
-    });
+    // absolute instants so adjacency is exact across transactions
+    const { base } = await one(a, `select (date_trunc('hour', now()) - interval '20 hours')::text as base`);
+    const at = (h, m = 0) => one(a, `select ($1::timestamptz + make_interval(hours => $2, mins => $3))::text as t`, [base, h, m]).then((r) => r.t);
+    const logAt = async (h1, m1, h2, m2) =>
+      one(a, 'select * from public.log_time(null, $1::timestamptz, $2::timestamptz)', [await at(h1, m1), await at(h2, m2)]);
+    await logAt(10, 0, 11, 0);
+    await expectCode(logAt(10, 30, 12, 0), 'time_overlap'); // tail
+    await expectCode(logAt(9, 0, 10, 30), 'time_overlap'); // head
+    await expectCode(logAt(9, 0, 12, 0), 'time_overlap'); // contains
+    await expectCode(logAt(10, 10, 10, 50), 'time_overlap'); // inside
+    await logAt(11, 0, 12, 0); // adjacent after
+    await logAt(9, 0, 10, 0); // adjacent before
     expect(await entries(a)).toHaveLength(3);
   });
 

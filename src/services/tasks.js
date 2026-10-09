@@ -13,7 +13,7 @@ export const OPEN_STATUSES = ['todo', 'in_progress'];
 
 export const TASK_COLS =
   'id, title, description, status, priority, category_id, tags, due_date, estimated_minutes, actual_minutes, ' +
-  'recurrence, recurrence_parent_id, completed_at, created_at, updated_at';
+  'completed_at, created_at, updated_at'; // base 000100 columns (recurrence* come via '*')
 // '*' instead of TASK_COLS: works with or without migration 000300 (recurrence columns).
 const SELECT = '*, category:categories(id, name, color)';
 

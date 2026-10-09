@@ -19,9 +19,9 @@ Không có server riêng. Toàn bộ "backend logic" nằm ở 3 chỗ:
 
 | Loại logic | Nằm ở đâu |
 |---|---|
-| Phân quyền dữ liệu | RLS policies (`policies.sql`) |
-| Toàn vẹn dữ liệu | CHECK / FK / unique index (`schema.sql`) |
-| Dữ liệu dẫn xuất cần chính xác (completed_at, actual_minutes, KPI current_value, activity feed) | DB triggers (`schema.sql`) |
+| Phân quyền dữ liệu | RLS policies (`supabase/migrations/20261009000100_initial_schema.sql`, phần 2) |
+| Toàn vẹn dữ liệu | CHECK / FK / unique index + trigger kiểm tra loại category, timezone (`supabase/migrations/`) |
+| Dữ liệu dẫn xuất cần chính xác (completed_at, actual_minutes, KPI current_value, activity feed) | DB triggers (`supabase/migrations/`) |
 
 ## 2. Quyết định công nghệ
 
@@ -43,7 +43,9 @@ Thay đổi so với đề bài: bỏ `src/js` (mơ hồ với `pages`/`componen
 docs/ARCHITECTURE.md
 public/                          favicon, static assets
 supabase/
-  schema.sql  policies.sql  seed.sql
+  migrations/  (nguồn schema DUY NHẤT, áp bằng `supabase db push`)
+  tests/database.test.sql   seed.sql (demo, chạy tay)   certs/ (Root CA công khai của Supabase)
+scripts/db/   check.mjs test.mjs seed.mjs lib.mjs  (Node, không bundle vào Vite)
 src/
   main.js                        bootstrap: auth guard → router → shell
   css/    tokens.css base.css layout.css components.css
@@ -117,6 +119,31 @@ Mọi bảng dữ liệu có `user_id uuid default auth.uid()`.
 
 ## 7. Kiểm chứng đã làm (Phase 1)
 
-`schema.sql` + `policies.sql` (+ `seed.sql`) được chạy trên PostgreSQL thật (PGlite) với stub `auth.users` / `auth.uid()` / role `anon`, `authenticated`: **53 test pass** — gồm cô lập dữ liệu A/B trên cả 10 bảng, chặn tham chiếu chéo, trigger, constraint, `anon` bị từ chối, policies chạy lại được (idempotent), cascade khi xóa user.
+Bản schema đầu tiên được chạy trên PostgreSQL thật (PGlite) với stub `auth.users` / `auth.uid()` / role `anon`, `authenticated`: **53 test pass** — gồm cô lập dữ liệu A/B trên cả 10 bảng, chặn tham chiếu chéo, trigger, constraint, `anon` bị từ chối, policies chạy lại được (idempotent), cascade khi xóa user.
 
 Chưa kiểm chứng được: hành vi thật của Supabase Auth/PostgREST (cần project thật) — sẽ test ở Phase 2 khi bạn cung cấp URL + anon key.
+
+## 8. Vận hành database (Phase 2)
+
+| Lệnh | Việc làm | Ghi vào DB? |
+|---|---|---|
+| `npm run db:check` | Kết nối PostgreSQL (TLS xác thực bằng `supabase/certs/supabase-root-2021-ca.crt`) + kiểm tra bảng, RLS (36 policy), RPC, trigger, lịch sử migration; rồi kiểm tra qua Supabase API như trình duyệt (anon bị chặn, tài khoản demo đăng nhập, đọc qua RLS, gọi RPC) | Không |
+| `npm run db:test` | Chạy `supabase/tests/*.test.sql` trong `BEGIN … ROLLBACK` (giả lập user bằng `set local role` + `request.jwt.claims`). `-- --with-migrations` áp thêm các migration trong cùng transaction = dry run trước khi push | Không (rollback) |
+| `npm run db:seed` | Tạo/cập nhật tài khoản demo (`DEMO_EMAIL`, `DEMO_PASSWORD` trong `.env`; tự sinh mật khẩu nếu thiếu) và dựng lại dữ liệu mẫu ~3 tháng | **Có** — chỉ tài khoản có cờ `demo_account` |
+| `supabase db push` | Áp migration mới | **Có** |
+
+Quy tắc: không sửa migration đã push — luôn thêm file mới. `DATABASE_URL`/`DEMO_*` không bao giờ có tiền tố `VITE_`.
+
+**Lớp nghiệp vụ (`20261009000200_business_logic.sql`)** — mọi RPC là `SECURITY INVOKER` (RLS vẫn áp dụng), chỉ `authenticated` được gọi:
+
+| RPC / view | Dùng cho |
+|---|---|
+| `get_dashboard_summary()` → jsonb | Dashboard: task (mở/quá hạn/hoàn thành hôm nay-tuần-tháng), giờ hôm nay/tuần (+ timer đang chạy), chi tiêu tháng/tháng trước/ngân sách, KPI, mua sắm |
+| `get_budget_status(month)` | Ngân sách carry-forward theo category + dòng tổng (`category_id` NULL) |
+| `get_expense_by_category(from,to)`, `get_daily_expenses(from,to)` | Báo cáo chi tiêu (khoảng ≤ 366 ngày) |
+| `get_task_stats(from,to)`, `get_time_by_day(from,to)`, `get_time_by_category(from,to)` | Báo cáo năng suất, gom theo ngày ở `profiles.timezone` |
+| `start_timer(task, desc)`, `stop_timer()` | Timer nguyên tử: tự đóng timer cũ, `todo → in_progress`, chặn task đã đóng |
+| `purchase_shopping_item(item, date, method, create_expense)` | Mua hàng → tạo đúng 1 expense và liên kết `expense_id` |
+| view `kpi_progress` | KPI + `progress_percent`, `days_left`, `last_recorded_on` |
+
+Ràng buộc bổ sung: category của task phải `kind='task'`, của expense/budget/shopping phải `kind='expense'`; category đang dùng không đổi được `kind`; `profiles.timezone` phải là IANA hợp lệ; `shopping_items.purchased_on` tự đặt khi `purchased`, tự xóa khi rời trạng thái đó.

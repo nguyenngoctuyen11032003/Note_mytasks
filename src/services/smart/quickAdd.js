@@ -38,7 +38,7 @@
 
 import { addDays, weekday, endOfMonth, startOfMonth, addMonths } from '../../utils/date.js';
 import {
-  Scanner, B, E, accentOk, normalizeVi, isoDay, validYmd, mondayOf, resolveToday, tidy,
+  Scanner, B, E, accentOk, normalizeVi, isoDay, validYmd, mondayOf, resolveToday,
 } from './text.js';
 
 const MAX_TAGS = 20;
@@ -187,10 +187,16 @@ const RECURRENCE_RULES = [
   { re: `${B}(?:(?:moi|hang)\\s+thang|monthly|every\\s*month)${E}`, value: 'monthly' },
 ];
 
+// "hàng" is also a noun: "khách hàng ngày mai" = customer + tomorrow, not "daily".
+const HANG_NOUN_PREV = new Set(['khach', 'cua', 'mat', 'don', 'ngan', 'giao', 'nhan', 'chu', 'kho', 'lo', 'chuyen', 'xep', 'nhap', 'xuat']);
+
 function parseRecurrence(sc, today) {
   for (const rule of RECURRENCE_RULES) {
     for (const m of sc.matches(rule.re)) {
       if (!accentOk(sc.orig(m.index, m.index + m[0].length))) continue;
+      const end = m.index + m[0].length;
+      if (/ngay$/.test(m[0]) && /^(?:mai|kia|mot|nay)(?![\p{L}\p{N}])/u.test(sc.after(end))) continue;
+      if (/^hang\s/.test(m[0]) && HANG_NOUN_PREV.has(sc.before(m.index).split(/\s+/).pop())) continue;
       sc.take(m);
       const due = rule.weekdayGroup ? upcoming(today, wdIndex(m, rule.weekdayGroup), true) : null;
       return { recurrence: rule.value, due };
@@ -332,6 +338,6 @@ export function parseTaskInput(text, { today, categories } = {}) {
   const due_date = recurDue ?? parseDate(sc, t);
 
   let title = sc.remainder();
-  if (!title) title = tidy(sc.src) || sc.src.trim();
+  if (!title) title = sc.src.replace(/\s+/g, ' ').trim();
   return { title, due_date, priority, tags, estimated_minutes, category_id, recurrence };
 }

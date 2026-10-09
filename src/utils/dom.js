@@ -21,7 +21,11 @@ export function html(strings, ...values) {
   let out = '';
   strings.forEach((str, i) => {
     out += str;
-    if (i < values.length) out += render(values[i]);
+    if (i >= values.length) return;
+    const v = values[i];
+    // Inside an attribute value (aria-pressed="${bool}") booleans print as text;
+    // in content position they render nothing (so `${cond && html`…`}` works).
+    out += typeof v === 'boolean' && str.endsWith('="') ? String(v) : render(v);
   });
   return new SafeHTML(out);
 }

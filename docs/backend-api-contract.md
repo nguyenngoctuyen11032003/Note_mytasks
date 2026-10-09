@@ -48,7 +48,7 @@ Mọi thay đổi phải cập nhật file này.
 - `in_progress` +10 (đang dở thì làm nốt)
 - task ngắn (estimated ≤ 30 phút) +5 (quick win)
 - tuổi: task tạo > 14 ngày chưa xong +5 (tránh bị bỏ quên)
-- `reasons`: mã lý do theo thứ tự đóng góp: `overdue`, `due_today`, `due_tomorrow`, `due_soon`, `priority_urgent`, `priority_high`, `in_progress`, `quick_win`, `stale`.
+- `reasons`: mã lý do theo thứ tự cố định (SQL `focus_tasks` và JS `scoring.js` giống nhau): `overdue`, `due_today`, `due_tomorrow`, `due_soon`, `priority_urgent`, `priority_high`, `in_progress`, `quick_win`, `stale`.
 
 ## 2. Finance (`000400`)
 

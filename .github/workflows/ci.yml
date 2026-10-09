@@ -35,6 +35,9 @@ jobs:
       - name: Chặn secret lọt vào biến VITE_*
         run: node .github/scripts/check-public-env.mjs
 
+      - name: Unit + database tests (vitest, PGlite)
+        run: npm test
+
       - run: npm run build
 
   database:

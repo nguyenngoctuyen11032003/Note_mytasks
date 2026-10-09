@@ -55,7 +55,7 @@ const RISKY = {
   ty: ['tỷ', 'tỉ'], ti: ['tỉ', 'tỷ'], dung: ['dụng'], toan: ['toán'], tra: ['trả'],
 };
 /** Words that must carry their accent (the bare ASCII form is too ambiguous). */
-const ACCENT_REQUIRED = new Set(['mot', 'ti']);
+const ACCENT_REQUIRED = new Set(['ti']);
 
 /** True when every word of the original span is an acceptable spelling. */
 export function accentOk(original) {

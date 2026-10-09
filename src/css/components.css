@@ -90,7 +90,7 @@
 
 .input-group { position: relative; display: flex; align-items: center; }
 .input-group > svg { position: absolute; left: 12px; width: 16px; height: 16px; color: var(--ink-3); pointer-events: none; }
-.input-group > .input { padding-left: 36px; }
+.input-group > svg ~ .input { padding-left: 36px; }
 .input-group__suffix { position: absolute; right: 12px; font-size: var(--fs-xs); color: var(--ink-3); font-family: var(--font-mono); pointer-events: none; }
 .input-group > .input.has-suffix { padding-right: 52px; }
 
@@ -457,3 +457,9 @@ kbd { font-family: var(--font-mono); font-size: 10px; padding: 1px 5px; border-r
 .dl { display: grid; grid-template-columns: auto 1fr; gap: var(--s-2) var(--s-5); font-size: var(--fs-sm); }
 .dl dt { color: var(--ink-3); }
 .dl dd { margin: 0; text-align: right; font-family: var(--font-mono); font-size: var(--fs-xs); }
+
+/* Fixes after visual QA */
+.topbar .topbar__menu { display: none; }
+@media (max-width: 960px) { .topbar .topbar__menu { display: inline-grid; } }
+.field { align-content: start; }
+.sheet__foot svg, .danger-text svg, .success-text svg { width: 14px; height: 14px; display: inline-block; vertical-align: -2px; }

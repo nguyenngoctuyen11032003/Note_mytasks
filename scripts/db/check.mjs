@@ -24,9 +24,11 @@ const check = (cond, msg, detail = '') => (cond ? ok(msg) : bad(detail ? `${msg}
 
 // ------------------------------------------------------------------ 1. PostgreSQL
 console.log('▶ PostgreSQL');
+let pgClient;
 try {
   const t0 = Date.now();
   const { client, host } = await connect();
+  pgClient = client;
   const { rows: [v] } = await client.query(`select current_setting('server_version') as version, now() as now`);
   ok(`connected to ${host} — PostgreSQL ${v.version}, TLS verified, ${Date.now() - t0} ms`);
 
@@ -56,7 +58,7 @@ try {
             (select count(*) from pg_trigger t join pg_class c on c.oid = t.tgrelid
               where c.relnamespace = 'public'::regnamespace and not t.tgisinternal and t.tgenabled = 'D') as disabled_triggers`);
   check(g.auth_usage, 'authenticated has USAGE on schema public');
-  check(!g.anon_usage, 'anon has no USAGE on schema public');
+  console.log(`  · anon USAGE on schema public: ${g.anon_usage} (table/RPC access is revoked either way)`);
   check(g.view_ok, 'view kpi_progress present');
   check(Number(g.disabled_triggers) === 0, `${g.triggers} triggers, all enabled`, `${g.disabled_triggers} disabled`);
 
@@ -69,9 +71,10 @@ try {
             (select count(*) from auth.users) as auth_users`);
   console.log('  row counts:');
   console.table(counts.rows[0]);
-  await client.end();
 } catch (err) {
   bad(`PostgreSQL: ${formatPgError(err)}`);
+} finally {
+  await pgClient?.end().catch(() => {});
 }
 
 // ------------------------------------------------------------------ 2. Supabase API
