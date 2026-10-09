@@ -13,7 +13,9 @@ import * as store from '../core/store.js';
 import { notifyDataChanged } from '../core/events.js';
 import {
   updateProfile, getAvatarColor, setAvatarColor, getHomePage, setHomePage, HOME_PAGES, isValidTimezone,
+  uploadAvatar, removeAvatar,
 } from '../services/profile.js';
+import { checkImageFile, squareThumbnail } from '../utils/image.js';
 import { createCategory, updateCategory, deleteCategory, reorder } from '../services/categories.js';
 import { verifyPassword, updatePassword, signOut } from '../services/auth.js';
 import { clearActivity } from '../services/activity.js';
@@ -104,10 +106,21 @@ export default async function settingsPage(root) {
         <div class="st-body">
 
           <section class="st-sect" id="s-profile" aria-labelledby="h-profile">
-            ${head('h-profile', 'Hồ sơ', 'Tên hiển thị dùng trong lời chào, thanh bên và báo cáo. Màu ảnh đại diện lưu trên thiết bị này.')}
+            ${head('h-profile', 'Hồ sơ', 'Tên hiển thị dùng trong lời chào, thanh bên và báo cáo. Ảnh đại diện lưu trong tài khoản; màu nền chữ cái lưu trên thiết bị này.')}
             <form class="st-form" data-form="profile" novalidate>
               <div class="st-profile">
-                <span class="avatar avatar--lg st-avatar" data-avatar style="${avatar ? `--avatar-bg:${avatar};--avatar-fg:var(--accent-contrast)` : ''}">${initials(store.displayName())}</span>
+                <div class="st-avatar-col">
+                  <span class="avatar avatar--lg st-avatar" data-avatar style="${avatar ? `--avatar-bg:${avatar};--avatar-fg:var(--accent-contrast)` : ''}">${p.avatar_url
+                    ? html`<img src="${p.avatar_url}" alt="" decoding="async" />`
+                    : initials(store.displayName())}</span>
+                  <div class="st-avatar-acts">
+                    <label class="btn btn--sm btn--ghost" data-avatar-pick>
+                      ${icon('upload')}<span>${p.avatar_url ? 'Đổi ảnh' : 'Tải ảnh lên'}</span>
+                      <input class="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/heic,image/heif" data-avatar-file />
+                    </label>
+                    ${p.avatar_url ? html`<button type="button" class="btn btn--sm btn--ghost" data-act="avatar-remove">${icon('trash')}<span>Xoá ảnh</span></button>` : ''}
+                  </div>
+                </div>
                 <div class="st-profile__fields">
                   ${field({ label: 'Tên hiển thị', name: 'display_name', control: input('display_name', p.display_name, 'maxlength="80" autocomplete="name" placeholder="Ví dụ: Nguyễn Minh An"') })}
                   <div class="field">
@@ -157,7 +170,7 @@ export default async function settingsPage(root) {
           </section>
 
           <section class="st-sect" id="s-cats" aria-labelledby="h-cats">
-            ${head('h-cats', 'Danh mục', 'Kéo biểu tượng ⋮⋮ (hoặc dùng phím mũi tên) để sắp xếp. Xoá danh mục không xoá dữ liệu — các mục liên quan trở thành “chưa phân loại”.')}
+            ${head('h-cats', 'Danh mục', 'Kéo biểu tượng ⋮⋮ để sắp xếp (trên máy tính có thể dùng phím mũi tên). Xoá danh mục không xoá dữ liệu — các mục liên quan trở thành “chưa phân loại”.')}
             <div class="st-form">
               <div class="st-cats__bar">
                 <div class="segmented" role="group" aria-label="Loại danh mục">
@@ -539,7 +552,37 @@ export default async function settingsPage(root) {
   }));
   disposers.push(on(root, 'input', 'input[name="display_name"]', (e, el) => {
     const a = root.querySelector('[data-avatar]');
-    if (a) a.textContent = initials(el.value || store.displayName());
+    if (a && !a.querySelector('img')) a.textContent = initials(el.value || store.displayName());
+  }));
+  disposers.push(on(root, 'change', '[data-avatar-file]', async (e, el) => {
+    const file = el.files?.[0];
+    el.value = ''; // picking the same file again must fire 'change' again
+    const problem = checkImageFile(file);
+    if (problem) return toast.error(problem);
+    const pick = root.querySelector('[data-avatar-pick]');
+    pick?.classList.add('is-busy');
+    pick?.setAttribute('aria-busy', 'true');
+    try {
+      const { blob } = await squareThumbnail(file, 256);
+      const profile = await uploadAvatar(blob);
+      store.set({ profile });
+      toast('Đã cập nhật ảnh đại diện.');
+      render();
+    } catch (err) {
+      toast.error(err);
+    } finally {
+      pick?.classList.remove('is-busy');
+      pick?.removeAttribute('aria-busy');
+    }
+  }));
+  disposers.push(on(root, 'click', '[data-act="avatar-remove"]', async () => {
+    if (!(await confirmDialog({ title: 'Xoá ảnh đại diện?', message: 'Ảnh sẽ bị xoá khỏi tài khoản; thanh bên quay về chữ cái đầu của tên.' }))) return;
+    try {
+      const profile = await removeAvatar();
+      store.set({ profile });
+      toast('Đã xoá ảnh đại diện.');
+      render();
+    } catch (err) { toast.error(err); }
   }));
   disposers.push(on(root, 'change', '[data-theme-pick]', async (e, el) => {
     const theme = el.value;

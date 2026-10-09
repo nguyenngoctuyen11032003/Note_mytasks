@@ -510,7 +510,16 @@ html.tk-drawer-lock { overflow: hidden; }
   .tk-ledger::-webkit-scrollbar { display: none; }
   .tk-ledger__item { padding: var(--s-2) var(--s-3) var(--s-3); min-height: 58px; }
   .tk-ledger__n { font-size: var(--fs-xl); }
-  .tk-ledger__l { font-size: 11px; }
+  /* :root + !important beats theme.css's phone rule (11px !important, wrapping). */
+  :root .tk-ledger__l { font-size: 12px !important; white-space: nowrap !important; }
+  :root .tk-tag { font-size: 12px; }
+  /* Columns size to their label so "Xong hôm nay" stays on one line; the
+     strip scrolls sideways when it doesn't fit, with a faded edge as a cue. */
+  .tk-ledger {
+    grid-template-columns: repeat(5, max-content);
+    -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent);
+    mask-image: linear-gradient(90deg, #000 88%, transparent);
+  }
 
   .tk-qa__row { padding-left: var(--s-3); }
   .tk-qa__kbd, .tk-qa__help { display: none; }

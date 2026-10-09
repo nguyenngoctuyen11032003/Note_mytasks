@@ -8,7 +8,7 @@ import { navigate } from '../core/router.js';
 import { initials, clock, day } from '../utils/format.js';
 import { today } from '../utils/date.js';
 import { onTick, onPomodoro, pomodoro, formatCountdown, sessionSeconds, pausedSession } from './timer.js';
-import { popMenu } from './ui.js';
+import { popMenu, isTouchOnly } from './ui.js';
 import { applyTheme, currentThemePref, onThemeChange } from './theme.js';
 import { toast } from './toast.js';
 import { updateProfile } from '../services/profile.js';
@@ -288,7 +288,9 @@ function renderUser() {
   if (isRail()) card.title = name;
   card.setAttribute('aria-label', `Tài khoản: ${name}${email ? ` (${email})` : ''}. Mở menu tài khoản`);
   mount(card, html`
-    <span class="avatar" aria-hidden="true">${initials(name)}</span>
+    <span class="avatar" aria-hidden="true">${store.get().profile?.avatar_url
+      ? html`<img src="${store.get().profile.avatar_url}" alt="" decoding="async" />`
+      : initials(name)}</span>
     <span class="usercard__text"><span class="usercard__name truncate">${name}</span><span class="usercard__mail truncate">${email}</span></span>
     ${icon('chevronDown', 'faint usercard__gear')}`);
 }
@@ -336,7 +338,8 @@ export async function setThemePref(pref) {
 function userMenu(anchor, onSignOut) {
   popMenu(anchor, [
     { label: 'Hồ sơ & cài đặt', icon: 'settings', onClick: () => { closeDrawer(); navigate('/settings'); } },
-    { label: 'Phím tắt', icon: 'keyboard', onClick: () => { closeDrawer(); import('./shortcuts.js').then((m) => m.openShortcutHelp()); } },
+    // No keyboard on touch-only devices → no shortcut sheet.
+    ...(isTouchOnly() ? [] : [{ label: 'Phím tắt', icon: 'keyboard', onClick: () => { closeDrawer(); import('./shortcuts.js').then((m) => m.openShortcutHelp()); } }]),
     'sep',
     { label: 'Đăng xuất', icon: 'logout', onClick: () => { closeDrawer(); onSignOut(); } },
   ]);

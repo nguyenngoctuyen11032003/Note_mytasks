@@ -470,3 +470,50 @@ kbd { font-family: var(--font-mono); font-size: 10px; padding: 1px 5px; border-r
   :root .icon-btn, :root .icon-btn--sm { min-width: 40px; min-height: 40px; }
   :root .btn--sm { min-height: 40px; }
 }
+
+/* ---------- Touch & phone layer (laptop/mobile QA pass) ----------
+   Scoped by media queries; :root raises specificity over theme.css,
+   which loads after this file. */
+
+/* Finger-sized hit areas for small round controls, without moving the
+   layout: an invisible ring extends the tappable area to ~44px. */
+@media (pointer: coarse) {
+  :root .tick, :root .tk-sel, :root .swatch { position: relative; }
+  :root .tick::after, :root .tk-sel::after, :root .swatch::after {
+    content: ''; position: absolute; inset: -11px; border-radius: 50%;
+  }
+  :root .tag, :root .xp-pill, :root .insight__action { min-height: 34px; }
+  :root .xp-legend__row { min-height: 40px; }
+  :root .segmented button, :root .segmented label span { min-height: 38px; }
+}
+
+/* Touch-only devices have no keyboard: drop shortcut hints and keycaps. */
+@media (hover: none) and (pointer: coarse) {
+  :root .topbar__search-kbd, :root .tk-qa__kbd, :root .tk-help-btn,
+  :root .xp-quick__go kbd, :root .calx-hint, :root .nb-keys { display: none !important; }
+}
+
+/* Phones: readable minimum sizes, shorter intros and charts. */
+@media (max-width: 767px) {
+  :root { --fs-2xs: 0.75rem; --fs-xs: 0.8125rem; } /* 12 / 13px (was 11.5 / 12.5) */
+  :root .delta, :root .badge, :root .chart-key, :root .table th, :root .tabs .count { font-size: 12px; }
+  :root .calx-fig { font-size: 11px; }
+
+  :root .page-head__lede {
+    font-size: var(--fs-sm); line-height: 1.5;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+
+  /* Money figures must not push the currency onto its own line. */
+  :root .stat__value { overflow-wrap: anywhere; }
+  :root .xp-stat__v { white-space: nowrap; font-size: clamp(1.35rem, 6vw, 1.9rem); }
+
+  :root .chart-box { height: 200px; }
+  :root .chart-box--sm { height: 150px; }
+
+  /* Horizontally scrolling chip rows: fade the cut edge so it reads as scrollable. */
+  :root .xp-quick__eg, :root .rp-periods {
+    -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent);
+    mask-image: linear-gradient(90deg, #000 85%, transparent);
+  }
+}

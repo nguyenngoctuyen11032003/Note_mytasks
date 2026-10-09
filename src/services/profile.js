@@ -69,6 +69,45 @@ export async function update(patch) {
   return run(db().from('profiles').update(row).eq('id', id).select(PROFILE_COLS).single());
 }
 
+/* ------------------------------------------------------------------ */
+/* Avatar image — Supabase Storage bucket 'avatars' (migration 001200)  */
+/* ------------------------------------------------------------------ */
+
+export const AVATAR_BUCKET = 'avatars';
+const AVATAR_TYPES = { 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/png': 'png' };
+const AVATAR_MAX_BYTES = 512 * 1024; // bucket limit
+
+/**
+ * Uploads an already-resized image (see utils/image.js squareThumbnail) to
+ * avatars/<uid>/avatar.<ext> and stores its public URL in profiles.avatar_url.
+ * Returns the updated profile row.
+ */
+export async function uploadAvatar(blob) {
+  const type = blob?.type;
+  const ext = AVATAR_TYPES[type];
+  if (!ext) throw invalid('avatar_url', 'Ảnh đại diện phải là WebP, JPG hoặc PNG.');
+  if (!blob.size || blob.size > AVATAR_MAX_BYTES) throw invalid('avatar_url', 'Ảnh đại diện tối đa 512 KB.');
+  const id = await currentUserId();
+  const bucket = db().storage.from(AVATAR_BUCKET);
+  const path = `${id}/avatar.${ext}`;
+  await run(bucket.upload(path, blob, { upsert: true, contentType: type, cacheControl: '3600' }));
+  // A previous upload may have used another format — drop it (best effort).
+  const stale = Object.values(AVATAR_TYPES).filter((e) => e !== ext).map((e) => `${id}/avatar.${e}`);
+  bucket.remove(stale).catch(() => {});
+  const { data } = bucket.getPublicUrl(path);
+  // ?v= busts browser/CDN caches, since the object path never changes.
+  return update({ avatar_url: `${data.publicUrl}?v=${Date.now()}` });
+}
+
+/** Deletes the stored image(s) and clears profiles.avatar_url. */
+export async function removeAvatar() {
+  const id = await currentUserId();
+  const bucket = db().storage.from(AVATAR_BUCKET);
+  const files = (await run(bucket.list(id))) || [];
+  if (files.length) await run(bucket.remove(files.map((f) => `${id}/${f.name}`)));
+  return update({ avatar_url: null });
+}
+
 /** Compat: getProfile(userId?) — defaults to the signed-in user. */
 export async function getProfile(userId) {
   const id = typeof userId === 'string' && userId ? userId : await currentUserId();

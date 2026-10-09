@@ -13,7 +13,7 @@ import * as store from '../core/store.js';
 import { notifyDataChanged } from '../core/events.js';
 import { money, day } from '../utils/format.js';
 import { toast } from './toast.js';
-import { TASK_STATUS } from './ui.js';
+import { TASK_STATUS, isTouchOnly } from './ui.js';
 import { openTaskForm } from './taskForm.js';
 import * as timer from './timer.js';
 import { listTasks } from '../services/tasks.js';
@@ -143,7 +143,8 @@ function staticCommands() {
     { id: 'act:home', icon: 'pin', label: 'Đặt trang này làm trang chủ', sub: NAV.find((n) => n.path === path)?.label, keywords: 'home mac dinh landing', run: () => setHome(path) },
     { id: 'act:help', icon: 'info', label: 'Xem phím tắt', keywords: 'keyboard shortcuts phim tat tro giup', kbd: ['?'], run: () => ctx.onHelp?.() },
     { id: 'act:signout', icon: 'logout', label: 'Đăng xuất', keywords: 'sign out logout thoat', run: () => ctx.onSignOut?.() },
-  ].map((a) => ({ ...a, group: 'Hành động' }));
+  ].filter((a) => a.id !== 'act:help' || !isTouchOnly()) // no keyboard → no shortcut sheet
+    .map((a) => ({ ...a, group: 'Hành động' }));
   return [...actions, ...navs];
 }
 

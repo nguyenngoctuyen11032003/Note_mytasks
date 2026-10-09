@@ -40,6 +40,15 @@
 .st-profile { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s-6); align-items: start; }
 .st-avatar { width: 88px; height: 88px; font-size: 40px; transition: background var(--t-med) var(--ease); box-shadow: 0 0 0 4px var(--surface), 0 0 0 5px var(--rule); }
 .st-profile__fields { display: grid; gap: var(--s-4); min-width: 0; }
+.st-avatar-col { display: grid; justify-items: center; gap: var(--s-3); }
+.st-avatar-acts { display: grid; gap: var(--s-1); justify-items: center; }
+.st-avatar-acts .btn { cursor: pointer; }
+.st-avatar-acts .btn:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.st-avatar-acts .is-busy { opacity: 0.6; pointer-events: none; }
+@media (max-width: 640px) {
+  .st-avatar-col { grid-auto-flow: column; justify-content: start; align-items: center; }
+  .st-avatar-acts { justify-items: start; }
+}
 .st-swatch--ink { background: var(--ink); }
 .st-form .swatch { width: 32px; height: 32px; }
 
@@ -152,4 +161,31 @@
   .st-actions .btn { width: 100%; }
   .st-keys__row { gap: var(--s-3); }
   .st-keys dt { min-width: 88px; }
+}
+
+/* ---------- Touch & phones ---------- */
+/* Touch-only devices have no keyboard: no "Phím tắt" section or nav entry. */
+@media (hover: none) and (pointer: coarse) {
+  #s-keys, .st-nav a[data-jump='s-keys'] { display: none !important; }
+
+  /* Install guide: only the steps for this device (desktop steps never). */
+  .st-install { grid-template-columns: 1fr; }
+  .st-install article:nth-child(3) { display: none; }
+  @supports (-webkit-touch-callout: none) {          /* iOS / iPadOS */
+    .st-install article:nth-child(2) { display: none; }
+  }
+  @supports not (-webkit-touch-callout: none) {      /* Android & others */
+    .st-install article:nth-child(1) { display: none; }
+  }
+}
+/* Running as the installed app: keep the "already installed" notice, drop the steps. */
+@media (display-mode: standalone) {
+  .st-install { display: none; }
+}
+/* Phones: the section chips scroll sideways — fade the cut edge as a cue. */
+@media (max-width: 767px) {
+  .st-nav {
+    -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent);
+    mask-image: linear-gradient(90deg, #000 85%, transparent);
+  }
 }

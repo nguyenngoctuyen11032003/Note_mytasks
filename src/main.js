@@ -196,6 +196,8 @@ function visibleQuickAddAnchor() {
 function onQuickAdd(anchor) {
   const a = anchor && anchor.getClientRects().length ? anchor : visibleQuickAddAnchor();
   if (!a) return;
+  // The tab-bar FAB sits mid-screen: centre the menu over it.
+  const align = a.closest('.topbar') ? 'end' : 'center';
   popMenu(a, [
     { label: 'Ghi chú', icon: 'note', onClick: () => navigate('/notes', { new: '1' }) },
     { label: 'Công việc', icon: 'tasks', onClick: () => openTaskForm({ onSaved: () => notifyDataChanged('tasks') }) },
@@ -203,7 +205,7 @@ function onQuickAdd(anchor) {
     { label: 'Món cần mua', icon: 'cart', onClick: () => navigate('/shopping', { new: '1' }) },
     { label: 'Ghi giờ thủ công', icon: 'clock', onClick: () => navigate('/time', { new: '1' }) },
     { label: 'Cập nhật KPI', icon: 'target', onClick: () => navigate('/kpi') },
-  ]);
+  ], { align });
 }
 
 async function doSignOut() {

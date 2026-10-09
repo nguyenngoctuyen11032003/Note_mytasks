@@ -86,8 +86,17 @@ export function closeMenu() {
   openMenuEl?.remove();
   openMenuEl = null;
 }
-/** items: [{ label, icon, onClick, danger }] or 'sep' */
-export function popMenu(anchor, items) {
+/** True on touch-only devices (no hover, coarse pointer): no physical keyboard to expect. */
+export function isTouchOnly() {
+  return Boolean(window.matchMedia?.('(hover: none) and (pointer: coarse)').matches);
+}
+
+/**
+ * items: [{ label, icon, onClick, danger }] or 'sep'
+ * opts.align: 'end' (default, menu's right edge on the anchor's right edge) or
+ * 'center' (centred over the anchor — e.g. the tab-bar FAB).
+ */
+export function popMenu(anchor, items, opts = {}) {
   closeMenu();
   const el = document.createElement('div');
   el.className = 'menu';
@@ -96,7 +105,8 @@ export function popMenu(anchor, items) {
   document.body.append(el);
   const r = anchor.getBoundingClientRect();
   const w = el.offsetWidth, h = el.offsetHeight;
-  let left = Math.min(r.right - w, window.innerWidth - w - 8);
+  const want = opts.align === 'center' ? r.left + r.width / 2 - w / 2 : r.right - w;
+  let left = Math.min(want, window.innerWidth - w - 8);
   left = Math.max(8, left);
   let top = r.bottom + 6;
   if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6);
