@@ -127,11 +127,11 @@ window.addEventListener('hashchange', closeMenu);
 window.addEventListener('resize', closeMenu);
 
 /* ---------- Tag input ---------- */
-export function tagInput(name, tags = []) {
+export function tagInput(name, tags = [], id = '__ID__') {
   return html`
     <div class="tag-input" data-tag-input="${name}">
       ${tags.map((t) => html`<span class="tag" data-tag="${t}">${t}<button type="button" aria-label="Bỏ thẻ ${t}">${icon('x')}</button></span>`)}
-      <input id="__ID__" type="text" placeholder="${tags.length ? '' : 'Gõ thẻ rồi nhấn Enter'}" autocomplete="off" maxlength="40" />
+      <input id="${id}" type="text" placeholder="${tags.length ? '' : 'Gõ thẻ rồi nhấn Enter'}" autocomplete="off" maxlength="40" />
       <input type="hidden" name="${name}" value="${JSON.stringify(tags)}" />
     </div>`;
 }

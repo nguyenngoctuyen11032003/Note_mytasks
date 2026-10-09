@@ -429,8 +429,8 @@ export function noteTemplates() {
       content: `## Mục tiêu tuần\n1. \n2. \n3. \n\n## Ưu tiên cao\n- [ ] \n- [ ] \n\n## Theo ngày\n**Thứ Hai**\n- [ ] \n\n**Thứ Ba**\n- [ ] \n\n**Thứ Tư**\n- [ ] \n\n**Thứ Năm**\n- [ ] \n\n**Thứ Sáu**\n- [ ] \n\n**Cuối tuần**\n- [ ] \n\n## Nhìn lại\n> \n`,
     },
     {
-      id: 'brainstorm', label: 'Brainstorm', desc: 'Câu hỏi trọng tâm, ý tưởng, chấm điểm.', kind: 'note', icon: 'sparkle',
-      title: 'Brainstorm — ',
+      id: 'brainstorm', label: 'Động não', desc: 'Câu hỏi trọng tâm, ý tưởng, chấm điểm.', kind: 'note', icon: 'sparkle',
+      title: 'Động não — ',
       content: `## Câu hỏi trọng tâm\n> Làm thế nào để …?\n\n## Ý tưởng\n- \n- \n- \n\n## Chấm điểm\n| Ý tưởng | Tác động | Công sức |\n|---|---|---|\n|  | Cao | Thấp |\n\n## Thử ngay\n- [ ] \n`,
     },
     {

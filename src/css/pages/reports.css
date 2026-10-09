@@ -1,6 +1,6 @@
 /* reports — page-specific styles (owned by the Reports/Settings agent)
-   Editorial layout: § numbered sections separated by hairlines, figures on
-   paper "plates", and a dedicated A4 print layout at the bottom. */
+   Sections separated by hairlines, figures on surface cards, and a dedicated
+   A4 print layout at the bottom. */
 
 /* ---------- Period bar ---------- */
 .rp-bar {
@@ -22,10 +22,15 @@
 
 .rp-range {
   display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-4);
-  font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.03em; color: var(--ink-3);
+  font-size: var(--fs-xs); color: var(--ink-3);
   padding-bottom: var(--s-4); margin-bottom: var(--s-2); border-bottom: 1px solid var(--rule);
 }
 .rp-range span + span::before { content: '·'; margin-right: var(--s-4); color: var(--ink-4); }
+@media (max-width: 640px) {
+  /* Stacked on phones: one fact per line, no leading separator dots. */
+  .rp-range { flex-direction: column; gap: 2px; }
+  .rp-range span + span::before { content: none; }
+}
 
 /* ---------- Sections ---------- */
 .report { display: grid; gap: 0; }
@@ -73,6 +78,7 @@
 
 /* ---------- Figures ---------- */
 .rp-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--s-5); }
+.rp-grid--notes { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
 .rp-fig {
   margin: 0; min-width: 0; padding: var(--s-4) var(--s-5) var(--s-5);
   background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius-md);
@@ -93,8 +99,11 @@
 .rp-table { border: 1px solid var(--rule); border-radius: var(--radius-md); background: var(--surface); }
 .rp-table .table th { white-space: nowrap; }
 .rp-col-share { width: 22%; min-width: 140px; }
+.rp-share { display: flex; align-items: center; gap: var(--s-2); min-width: 0; }
+.rp-share .bar { flex: 1 1 auto; min-width: 48px; }
 .rp-pct { font-size: var(--fs-2xs); width: 42px; text-align: right; flex-shrink: 0; }
 .rp-rank { width: 36px; }
+.rp-kpi-name { min-width: 200px; }
 .rp-desc { min-width: 160px; max-width: 320px; overflow-wrap: anywhere; }
 .rp-mini { font-size: var(--fs-2xs); margin-top: 2px; }
 .rp-latest { margin-top: var(--s-3); }
@@ -121,8 +130,18 @@
   .rp-bar { gap: var(--s-3); }
   .rp-bar .segmented { width: 100%; overflow-x: auto; }
   .rp-bar .segmented button { flex: 1 0 auto; min-height: 40px; }
-  .rp-nav { width: 100%; justify-content: space-between; }
-  .rp-nav__title { flex: 1; font-size: var(--fs-md); min-width: 0; }
+  .rp-bar .segmented button { padding-inline: var(--s-2); }
+  .rp-nav {
+    width: 100%; display: grid; gap: var(--s-2);
+    grid-template-columns: 40px repeat(4, minmax(0, 1fr)) 40px; align-items: center;
+  }
+  .rp-nav__title { grid-column: 2 / span 4; font-size: var(--fs-md); min-width: 0; padding: 0; }
+  .rp-nav [data-act='next'] { grid-column: 6; }
+  .rp-nav .btn { grid-column: span 3; min-height: 40px; justify-content: center; }
+  .rp-nav .btn[hidden] { display: none; }
+  .rp-nav:has(.btn[hidden]) .btn { grid-column: 1 / -1; }
+  .rp-cmp { width: 100%; }
+  .rp-custom { width: 100%; }
   .rp-custom .input { flex: 1 1 130px; min-width: 0; min-height: 40px; }
   .rp-sec { padding: var(--s-7) 0 var(--s-6); }
   .rp-sec__head { grid-template-columns: minmax(0, 1fr) auto; }
@@ -130,6 +149,43 @@
   .rp-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-3); }
   .rp-tiles--stack { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .rp-fig { padding: var(--s-3) var(--s-4) var(--s-4); }
+  /* The doughnut above already shows each share: drop the bar column so the
+     category table only scrolls for budget/compare columns. */
+  .rp-table .rp-col-share { display: none; }
+
+  /* KPI and top-expense tables become stacked cards on phones. */
+  .rp-cards { overflow: visible; }
+  .rp-cards thead { display: none; }
+  .rp-cards table, .rp-cards tbody { display: block; }
+  .rp-cards tr { display: grid; gap: var(--s-1) var(--s-3); align-items: center; padding: var(--s-3) var(--s-4); border-bottom: 1px solid var(--rule); }
+  .rp-cards tr:last-child { border-bottom: 0; }
+  .rp-cards .table td { display: block; padding: 0; border: 0; min-width: 0; text-align: left; }
+  .rp-cards .table tbody tr:hover td { background: none; }
+  .rp-cards td[data-label]::before { content: attr(data-label) ': '; color: var(--ink-3); font-weight: 400; }
+
+  .rp-cards--kpi tr {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'name fc' 'share share' 'val val' 'chg due';
+  }
+  .rp-cards--kpi [data-cell='name'] { grid-area: name; min-width: 0; }
+  .rp-cards--kpi .table [data-cell='fc'] { grid-area: fc; justify-self: end; text-align: right; }
+  .rp-cards--top .table [data-cell='amt'] { text-align: right; }
+  .rp-cards--kpi [data-cell='share'] { grid-area: share; width: auto; min-width: 0; }
+  .rp-cards--kpi [data-cell='val'] { grid-area: val; }
+  .rp-cards--kpi [data-cell='due'] { grid-area: due; justify-self: end; font-size: var(--fs-xs); }
+  .rp-cards--kpi [data-cell='chg'] { grid-area: chg; font-size: var(--fs-xs); }
+  .rp-cards--kpi .table [data-cell='rec'] { display: none; }
+
+  .rp-cards--top tr {
+    grid-template-columns: 20px auto minmax(0, 1fr) auto;
+    grid-template-areas: 'rank desc desc amt' 'rank date cat cat';
+  }
+  .rp-cards--top [data-cell='rank'] { grid-area: rank; width: auto; align-self: start; }
+  .rp-cards--top [data-cell='desc'] { grid-area: desc; min-width: 0; max-width: none; }
+  .rp-cards--top [data-cell='amt'] { grid-area: amt; justify-self: end; }
+  .rp-cards--top [data-cell='date'] { grid-area: date; font-size: var(--fs-xs); }
+  .rp-cards--top [data-cell='cat'] { grid-area: cat; font-size: var(--fs-xs); min-width: 0; }
+  .rp-cards--top .table [data-cell='pay'] { display: none; }
 }
 @media (max-width: 380px) {
   .rp-tiles { grid-template-columns: minmax(0, 1fr); }
@@ -142,18 +198,16 @@
 @media print {
   @page { size: A4; margin: 14mm 12mm 16mm; }
 
-  :root[data-print='report'] {
-    color-scheme: light;
-    --paper: #ffffff; --paper-2: #f3f1ec; --surface: #ffffff; --surface-2: #f7f5f0;
-    --ink: #111111; --ink-2: #333333; --ink-3: #5d5d5d; --ink-4: #8a8a8a;
-    --rule: #d6d2c8; --rule-strong: #b8b2a5;
-    --accent: #a4481f; --accent-ink: #8f3d1b; --accent-soft: #f6e7dc;
-    --shadow-1: none; --shadow-2: none;
-  }
+  /* The page switches to the latte (light) tokens before printing; paper
+     stays white, so surfaces drop their fills and keep only hairlines. */
+  :root[data-print='report'] { color-scheme: light; --shadow-1: none; --shadow-2: none; background: none !important; }
   :root[data-print='report'] body {
-    background: var(--paper) !important; color: var(--ink);
+    background: none !important; color: var(--ink);
     -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
+  :root[data-print='report'] .rp-fig,
+  :root[data-print='report'] .rp-table,
+  :root[data-print='report'] .stat { background: none !important; backdrop-filter: none !important; }
   :root[data-print='report'] body::before,
   :root[data-print='report'] body::after { display: none !important; }
 
@@ -179,8 +233,9 @@
   :root[data-print='report'] .rp-print-head {
     display: block; padding-bottom: 6mm; margin-bottom: 2mm; border-bottom: 1.5px solid var(--ink);
   }
+  :root[data-print='report'] .rp-print-brand { font-size: 9pt; font-weight: 600; color: var(--ink-3); }
   :root[data-print='report'] .rp-print-head h1 { font-family: var(--font-display); font-weight: 400; font-size: 24pt; margin: 2mm 0 1mm; }
-  :root[data-print='report'] .rp-print-head p { font-family: var(--font-mono); font-size: 8.5pt; color: var(--ink-3); }
+  :root[data-print='report'] .rp-print-head p { font-size: 8.5pt; color: var(--ink-3); }
 
   :root[data-print='report'] .report { font-size: 10pt; }
   :root[data-print='report'] .rp-sec { padding: 6mm 0 5mm; break-inside: auto; }
@@ -193,7 +248,7 @@
   :root[data-print='report'] .rp-tiles { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 3mm; margin-bottom: 4mm; }
   :root[data-print='report'] .rp-tiles--stack { grid-template-columns: minmax(0, 1fr); }
   :root[data-print='report'] .stat { padding: 3mm; border: 1px solid var(--rule); box-shadow: none; break-inside: avoid; }
-  :root[data-print='report'] .stat--accent { background: #fff; color: var(--ink); border-color: var(--ink); }
+  :root[data-print='report'] .stat--accent { color: var(--ink); border-color: var(--ink); }
   :root[data-print='report'] .stat--accent .eyebrow,
   :root[data-print='report'] .stat--accent .stat__meta { color: var(--ink-3); }
   :root[data-print='report'] .stat__icon { display: none; }

@@ -8,6 +8,12 @@
 //   literal. A bare integer < 1000 with no unit is read as thousands of VND ("phở 50" =
 //   50 000) — nobody records a 50 đ expense; ≥ 1000 is literal. An explicit "đ" keeps
 //   the literal value ("500đ" = 500).
+// - Slang: "củ"/"cu" = triệu, "xị"/"trăm" = 100 000; "rưỡi" adds half a unit ("5 củ
+//   rưỡi" = 5 500 000); a spaced tail after triệu/tỷ is a fraction ("1 tỷ 2"). A grouped
+//   number before a unit is grouped ("1.250k" = 1 250 000, "1.500tr" = 1.5 tỷ).
+// - A bare number < 1000 that is part of a name is not an amount: after a label word
+//   ("phòng 302", "tháng 9", "lớp 5", "Win 11") or a camel-case product ("iPhone 15"),
+//   or before a size/age unit ("55 inch", "512 gb", "20 tuổi"). Max 999 999 999 999.99.
 // - When several numbers appear the strongest wins (explicit unit > grouped > bare),
 //   then the LAST one ("Mua 3 cái bánh 45k" → 45 000, "3" stays in the description).
 //   Bare numbers followed by a quantity word ("3 ly", "2 kg") are never amounts.
@@ -22,9 +28,12 @@
 // - amount is null when no number is found; description = what remains (original casing).
 
 import { addDays, weekday } from '../../utils/date.js';
-import { Scanner, B, E, accentOk, isoDay, validYmd, mondayOf, resolveToday, normalizeVi } from './text.js';
+import {
+  Scanner, B, E, accentOk, isoDay, validYmd, mondayOf, resolveToday, normalizeVi, notADate, safeDay,
+} from './text.js';
 
-const MAX_AMOUNT = 1e12;
+// numeric(14,2) column limit (same as services/expenses.js)
+const MAX_AMOUNT = 999_999_999_999.99;
 
 // ---- numbers -----------------------------------------------------------------------
 
@@ -43,27 +52,57 @@ const QUANTITY_WORDS = [
   've', 'km', 'buoi', 'thang', 'ngay', 'tuan', 'nam', 'gio', 'phut', 'tieng', 'qua', 'trai',
   'con', 'bich', 'tui', 'cay', 'mieng', 'lat', 'cap', 'so', 'tang', 'phong', 'sp', 'mon', 'x',
   'hu', 'vi', 'tep', 'bao', 'ban', 'chuong', 'trang', 'loai', 'canh', 'hat', 'chuc',
+  // sizes / specs / ages: "55 inch", "512 gb", "20 tuổi"
+  'inch', 'cm', 'mm', 'gb', 'tb', 'mb', 'ghz', 'mah', 'w', 'kw', 'hp', 'tuoi', 'size', 'met', 'cu',
 ];
 const QUANTITY_AFTER = new RegExp(`^\\s*(?:${QUANTITY_WORDS.join('|')})(?![\\p{L}\\p{N}])`, 'u');
+const QUANTITY_AHEAD = `(?!\\s*(?:${QUANTITY_WORDS.join('|')})(?![\\p{L}\\p{N}]))`;
+
+// A bare number right after one of these words is part of a name, not a price:
+// "phòng 302", "tháng 9", "lớp 5", "size 42", "Win 11", "Xiaomi 14".
+const LABEL_BEFORE = new Set([
+  'phong', 'thang', 'lop', 'tap', 'size', 'so', 'tang', 'ban', 'khu', 'quan', 'phuong', 'duong',
+  'ngo', 'hem', 'kiet', 'toa', 'block', 'lo', 'nam', 'ky', 'quy', 'tuan', 'ngay', 'chuong', 'bai',
+  'phan', 'kenh', 'model', 'version', 'ver', 'gen', 'series', 'iphone', 'ipad', 'galaxy', 'xiaomi',
+  'redmi', 'oppo', 'vivo', 'samsung', 'pixel', 'nokia', 'macbook', 'win', 'windows', 'office',
+  'ios', 'android', 'note', 'pro', 'max', 'plus', 'ultra', 'ps', 'xbox', 'level', 'lv', 'top',
+]);
+function isNameNumber(sc, index) {
+  const prev = /([\p{L}\p{N}]+)\s*$/u.exec(sc.src.slice(0, index));
+  if (!prev) return false;
+  if (LABEL_BEFORE.has(normalizeVi(prev[1]))) return true;
+  return /\p{Ll}\p{Lu}/u.test(prev[1]); // camel-case product names: "iPhone", "MacBook"
+}
 
 const NUM_START = '(?<![\\p{L}\\p{N}.,/-])';
 const CURRENCY = '(?:\\s*(?:d|dong|vnd)(?![\\p{L}\\p{N}])|\\s*₫)';
+// "củ" is slang for a million, but also a tuber ("2 củ hành", "củ cải").
+const CU_NOT_TUBER = '(?!\\s+(?:hanh|toi|khoai|gung|sen|cai|nghe|san|kieu|dau|qua|ca\\s+rot)(?![\\p{L}\\p{N}]))';
+
+/**
+ * Number + unit (× mult) with an optional tail: attached digits ("1tr2", "1k5"),
+ * "rưỡi" (+ half a unit) or — when `spaced` — a spaced digit group ("1 triệu 2",
+ * "1 tỷ 2"; not when a quantity word follows: "2 triệu 2 người").
+ * "1.250k" / "1,250k" / "1.500tr" are grouped thousands × unit.
+ */
+function unitRule(unit, mult, { spaced = false } = {}) {
+  const spacedTail = spaced ? `\\s+(\\d{1,3})(?![\\p{L}\\p{N}])${QUANTITY_AHEAD}` : '(?!)()';
+  return {
+    rank: 3,
+    re: `${NUM_START}(\\d+(?:[.,]\\d+)?)(?:${unit})(?:(\\d{1,3})(?!\\p{N})|\\s+(ruoi)(?![\\p{L}\\p{N}])|${spacedTail})?${CURRENCY}?${E}`,
+    fn: (m) => (num(m[1]) + frac(m[2] ?? m[4]) + (m[3] ? 0.5 : 0)) * mult,
+  };
+}
+
 const AMOUNT_RULES = [
-  { // millions: 1tr, 1tr2, 1tr250, 1,5tr, 2 triệu, 3m
-    rank: 3,
-    re: `${NUM_START}(\\d+(?:[.,]\\d+)?)(?:\\s*(?:tr|trieu)|m)(?:(\\d{1,3})(?!\\p{N}))?${CURRENCY}?${E}`,
-    fn: (m) => (num(m[1], { grouped: false }) + frac(m[2])) * 1e6,
-  },
-  { // billions
-    rank: 3,
-    re: `${NUM_START}(\\d+(?:[.,]\\d+)?)\\s*(?:ty|ti)${E}`,
-    fn: (m) => num(m[1], { grouped: false }) * 1e9,
-  },
-  { // thousands: 35k, 35K, 35kđ, 1k5, 50 nghìn/ngàn
-    rank: 3,
-    re: `${NUM_START}(\\d+(?:[.,]\\d+)?)(?:\\s*(?:k|nghin|ngan))(?:(\\d{1,3})(?!\\p{N}))?${CURRENCY}?${E}`,
-    fn: (m) => (num(m[1], { grouped: false }) + frac(m[2])) * 1e3,
-  },
+  // millions: 1tr, 1tr2, 1tr250, 1,5tr, 2 triệu, 3m, 5 củ, 5tr rưỡi, 1 triệu 2
+  unitRule(`\\s*(?:tr|trieu)|m|\\s*cu${CU_NOT_TUBER}`, 1e6, { spaced: true }),
+  // billions: 2 tỷ, 1 tỷ 2
+  unitRule('\\s*(?:ty|ti)', 1e9, { spaced: true }),
+  // hundreds of thousands (slang): 2 xị, 2 trăm, 1 trăm rưỡi, 2 trăm nghìn
+  unitRule('\\s*(?:xi|tram(?:\\s*(?:nghin|ngan|k)(?![\\p{L}\\p{N}]))?)', 1e5),
+  // thousands: 35k, 35K, 35kđ, 1k5, 50 nghìn/ngàn, 1.250k
+  unitRule('\\s*(?:k|nghin|ngan)', 1e3),
   { // explicit currency: 35.000đ, 35000 đồng, 500đ
     rank: 3,
     re: `${NUM_START}(\\d{1,3}(?:[.,]\\d{3})+|\\d+)${CURRENCY}`,
@@ -85,22 +124,33 @@ const AMOUNT_RULES = [
   },
 ];
 
-function parseAmount(sc) {
+/**
+ * @param {Scanner} sc
+ * @param {{bareThousands?: boolean}} [opts] bareThousands=false (shopping): a bare number
+ *   < 1000 is never a price ("Rau 15", "Xiaomi 14", "Bút bi 0.5").
+ */
+function parseAmount(sc, { bareThousands = true } = {}) {
   const found = [];
   for (const rule of AMOUNT_RULES) {
     for (const m of sc.matches(rule.re)) {
       const end = m.index + m[0].length;
       if (found.some((f) => m.index < f.end && end > f.start)) continue;
       if (!accentOk(sc.orig(m.index, end))) continue;
-      if (rule.bare && QUANTITY_AFTER.test(sc.masked.slice(end))) continue;
+      if (rule.bare) {
+        if (QUANTITY_AFTER.test(sc.masked.slice(end))) continue;
+        const raw = num(m[1], { grouped: false });
+        if (raw < 1000 && (!bareThousands || isNameNumber(sc, m.index))) continue;
+      }
       const value = Math.round(rule.fn(m));
-      if (!Number.isFinite(value) || value <= 0 || value > MAX_AMOUNT) continue;
-      found.push({ start: m.index, end, rank: rule.rank, value });
+      // an out-of-range unit amount ("1000 tỷ") still blocks its digits from being re-read
+      const ok = Number.isFinite(value) && value > 0 && value <= MAX_AMOUNT;
+      found.push({ start: m.index, end, rank: rule.rank, value: ok ? value : null });
     }
   }
-  if (!found.length) return null;
-  found.sort((a, b) => b.rank - a.rank || b.start - a.start);
-  const best = found[0];
+  const valid = found.filter((f) => f.value != null);
+  if (!valid.length) return null;
+  valid.sort((a, b) => b.rank - a.rank || b.start - a.start);
+  const best = valid[0];
   sc.consume(best.start, best.end);
   return best.value;
 }
@@ -131,13 +181,16 @@ const DATE_RULES = [
     },
   },
   {
-    re: `(?<![\\p{L}\\p{N}/])(?:ngay\\s+)?(\\d{1,2})[/-](\\d{1,2})(?:[/-](\\d{4}|\\d{2}))?(?![\\p{L}\\p{N}/-])`,
-    fn(m, t) {
-      const d = +m[1], mo = +m[2];
-      if (m[3]) {
-        const y = m[3].length === 2 ? 2000 + +m[3] : +m[3];
+    re: `(?<![\\p{L}\\p{N}/.,])(ngay\\s+)?(\\d{1,2})([/-])(\\d{1,2})(?:[/-](\\d{4}|\\d{2}))?(?![\\p{L}\\p{N}/-]|[.,]\\d)`,
+    fn(m, t, sc) {
+      const d = +m[2], mo = +m[4];
+      if (m[5]) {
+        const y = m[5].length === 2 ? 2000 + +m[5] : +m[5];
         return validYmd(y, mo, d) ? isoDay(y, mo, d) : null;
       }
+      // "1/2 kg", "cafe 30k 1/2" are fractions; "họp 1-1" is a one-on-one
+      const after = sc.folded.slice(m.index + m[0].length);
+      if (notADate({ d: m[2], m: m[4], sep: m[3], prefixed: !!m[1], after })) return null;
       const y0 = +t.slice(0, 4);
       for (let y = y0; y >= y0 - 8; y--) {
         if (validYmd(y, mo, d) && isoDay(y, mo, d) <= t) return isoDay(y, mo, d);
@@ -151,7 +204,7 @@ function parseDate(sc, t) {
   for (const rule of DATE_RULES) {
     for (const m of sc.matches(rule.re)) {
       if (!accentOk(sc.orig(m.index, m.index + m[0].length))) continue;
-      const day = rule.fn(m, t);
+      const day = safeDay(() => rule.fn(m, t, sc));
       if (day) {
         sc.take(m);
         return day;
@@ -274,8 +327,9 @@ const MUST_RE = `${B}(?:phai\\s+mua|can\\s+gap|gap)${E}`;
  * "sữa tắm 120k x2 !" → { name: 'sữa tắm', unit_price: 120000, quantity: 2, priority: 'high' }
  * - quantity: "x2", "2x", "sl 2" (default 1)
  * - priority: "!!" / "gấp" / "phải mua" → must_buy, "!" → high (null when absent)
- * - price: same amount rules as expenses (k / tr / grouped / bare < 1000 = thousands),
- *   read as the UNIT price. null when absent.
+ * - price: same amount rules as expenses (k / tr / grouped / bare ≥ 1000), read as the
+ *   UNIT price. A bare number < 1000 is part of the name ("Xiaomi 14", "Rau 15"). null
+ *   when absent.
  */
 export function parseShoppingInput(text) {
   let src = String(text ?? '').normalize('NFC');
@@ -297,6 +351,6 @@ export function parseShoppingInput(text) {
     const q = Number(m[1] || m[2] || m[3]);
     if (q >= 1 && q <= 9999) { quantity = q; sc.take(m); break; }
   }
-  const unit_price = parseAmount(sc);
+  const unit_price = parseAmount(sc, { bareThousands: false });
   return { name: sc.remainder(), unit_price, quantity, priority };
 }

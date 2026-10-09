@@ -38,6 +38,7 @@
 
   --sidebar-w: 256px;
   --topbar-h: 68px;
+  --tabbar-h: 64px;
   --content-max: 1320px;
 
   --ease: cubic-bezier(0.16, 1, 0.3, 1);

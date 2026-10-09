@@ -24,9 +24,38 @@ export function foldAligned(text) {
   return out;
 }
 
+/** Zero-width space / non-joiner / joiner and BOM: invisible, never meaningful in input. */
+const ZERO_WIDTH = /[​-‍﻿]/g;
+
+/** String(text) → NFC without zero-width characters ('' for null/undefined). */
+export function cleanText(text) {
+  return String(text ?? '').normalize('NFC').replace(ZERO_WIDTH, '');
+}
+
 /** Lowercase, strip Vietnamese diacritics (đ→d), collapse whitespace, trim. */
 export function normalizeVi(text) {
-  return foldAligned(String(text ?? '').normalize('NFC')).replace(/\s+/g, ' ').trim();
+  return foldAligned(cleanText(text)).replace(/\s+/g, ' ').trim();
+}
+
+/** True when the text carries any Vietnamese diacritic (or đ), i.e. was typed "with accents". */
+export function hasDiacritics(text) {
+  const s = cleanText(text);
+  for (const ch of s) {
+    if (ch === 'đ' || ch === 'Đ') return true;
+    if (/\p{L}/u.test(ch) && ch.normalize('NFD').length > 1) return true;
+  }
+  return false;
+}
+
+// Vietnamese tone marks (grave, acute, tilde, hook, dot below). Their position inside a
+// syllable varies between "old" and "new" styles (hóa/hoá, khỏe/khoẻ), so accent-aware
+// comparisons use the base letters + the set of tone marks, not the raw string.
+const TONE_MARKS = /[̣̀́̃̉]/g;
+/** Lowercased, tone-position-insensitive key of a word ("Hoá" and "hóa" → same key). */
+export function toneKey(word) {
+  const d = cleanText(word).toLowerCase().normalize('NFD');
+  const tones = (d.match(TONE_MARKS) || []).sort().join('');
+  return d.replace(TONE_MARKS, '').normalize('NFC') + (tones ? '|' + tones : '');
 }
 
 /** Regex fragments for unicode-aware word boundaries (JS \b is ASCII-only). */
@@ -53,6 +82,7 @@ const RISKY = {
   thap: ['thấp'], binh: ['bình'], bang: ['bằng'], dong: ['đồng'], bua: ['bữa'],
   han: ['hạn'], vao: ['vào'], luc: ['lúc'],
   ty: ['tỷ', 'tỉ'], ti: ['tỉ', 'tỷ'], dung: ['dụng'], toan: ['toán'], tra: ['trả'],
+  cu: ['củ'], xi: ['xị'], tram: ['trăm'], ruoi: ['rưỡi', 'rưởi'], mung: ['mùng', 'mồng'],
 };
 /** Words that must carry their accent (the bare ASCII form is too ambiguous). */
 const ACCENT_REQUIRED = new Set(['ti']);
@@ -81,7 +111,7 @@ export function accentOk(original) {
  */
 export class Scanner {
   constructor(text) {
-    this.src = String(text ?? '').normalize('NFC');
+    this.src = cleanText(text);
     this.folded = foldAligned(this.src);
     this.masked = this.folded;
     this.spans = [];
@@ -155,6 +185,37 @@ export function validYmd(y, m, d) {
 }
 export const isIsoDay = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) &&
   validYmd(+s.slice(0, 4), +s.slice(5, 7), +s.slice(8, 10));
+
+// Units/counters that make a preceding "a/b" a fraction ("3/4 cuốn", "1/2 kg").
+const FRACTION_UNIT_AFTER = /^\s*(?:kg|gr|gram|lit|ml|cuon|quyen|ly|coc|chuong|trang|cai|phan|bai|chai|lon|hop|goi|qua|trai|mieng|lat|bat|dia|suat|chiec|tep|quang|duong|km|thia|muong|banh|o|cu)(?![\p{L}\p{N}])/u;
+const STANDALONE_FRACTIONS = new Set(['1/2', '1/4', '3/4']);
+
+/**
+ * Should a "d/m" or "d-m" match (no year) be rejected as a non-date? Documented rule:
+ * - fraction: no "ngày/hạn/vào" prefix, d < m ≤ 12, and either a unit/counter word follows
+ *   ("3/4 cuốn", "1/2 kg") or it is one of the stand-alone fractions 1/2, 1/4, 3/4
+ *   (so "cafe 30k 1/2" is half, while "1/3" is still the 1st of March);
+ * - hyphen form needs the prefix or a two-digit part ("5-11", "01-10"), so "họp 1-1" is
+ *   a one-on-one, not the 1st of January.
+ * @param {{d: string, m: string, sep: string, prefixed: boolean, after: string}} p
+ *   d/m as typed, `after` = folded text right after the match.
+ */
+export function notADate({ d, m, sep, prefixed, after }) {
+  if (prefixed) return false;
+  if (sep === '-' && d.length < 2 && m.length < 2) return true;
+  if (+d < +m && (FRACTION_UNIT_AFTER.test(after) || (sep === '/' && STANDALONE_FRACTIONS.has(`${+d}/${+m}`)))) return true;
+  return false;
+}
+
+/** Run a date computation; any throw or out-of-range result (year > 9999…) → null. */
+export function safeDay(fn) {
+  try {
+    const d = fn();
+    return isIsoDay(d) ? d : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Monday (ISO week start) of the week containing `day`. */
 export function mondayOf(day) {

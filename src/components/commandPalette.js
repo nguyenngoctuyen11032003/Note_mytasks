@@ -7,14 +7,13 @@
 // fetched once per opening and matched locally.
 import { html, fragment, raw, esc } from '../utils/dom.js';
 import { icon } from './icons.js';
-import { NAV } from './shell.js';
+import { NAV, setThemePref } from './shell.js';
 import { navigate, current } from '../core/router.js';
 import * as store from '../core/store.js';
 import { notifyDataChanged } from '../core/events.js';
 import { money, day } from '../utils/format.js';
 import { toast } from './toast.js';
 import { TASK_STATUS } from './ui.js';
-import { applyTheme } from './theme.js';
 import { openTaskForm } from './taskForm.js';
 import * as timer from './timer.js';
 import { listTasks } from '../services/tasks.js';
@@ -115,10 +114,9 @@ function highlight(text, query) {
 /* ------------------------------------------------------------------ */
 /* Commands                                                            */
 
+/** The espresso (dark) palette is the default; only data-theme=light is latte. */
 function effectiveTheme() {
-  const t = document.documentElement.dataset.theme;
-  if (t) return t;
-  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
 }
 
 function staticCommands() {
@@ -139,9 +137,9 @@ function staticCommands() {
     { id: 'act:new-note', icon: 'note', label: 'Tạo ghi chú', keywords: 'them note moi viet', run: () => navigate('/notes', { new: '1' }) },
     { id: 'act:new-expense', icon: 'wallet', label: 'Thêm khoản chi', keywords: 'chi tieu tien expense', run: () => navigate('/expenses', { new: '1' }) },
     { id: 'act:new-shopping', icon: 'cart', label: 'Thêm món cần mua', keywords: 'mua sam shopping', run: () => navigate('/shopping', { new: '1' }) },
-    { id: 'act:timer', icon: 'timer', label: 'Bắt đầu hẹn giờ', keywords: 'timer bam gio tinh gio dong ho start', run: startTimer },
+    { id: 'act:timer', icon: 'timer', label: 'Bắt đầu tính giờ', keywords: 'timer bam gio hen gio dong ho start', run: startTimer },
     { id: 'act:log-time', icon: 'clock', label: 'Ghi giờ thủ công', keywords: 'time entry', run: () => navigate('/time', { new: '1' }) },
-    { id: 'act:theme', icon: dark ? 'sun' : 'moon', label: dark ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối', keywords: 'doi giao dien theme dark light sang toi', run: () => applyTheme(dark ? 'light' : 'dark', { persist: true }) },
+    { id: 'act:theme', icon: dark ? 'sun' : 'moon', label: dark ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối', keywords: 'doi giao dien theme dark light sang toi', run: () => setThemePref(dark ? 'light' : 'dark') },
     { id: 'act:home', icon: 'pin', label: 'Đặt trang này làm trang chủ', sub: NAV.find((n) => n.path === path)?.label, keywords: 'home mac dinh landing', run: () => setHome(path) },
     { id: 'act:help', icon: 'info', label: 'Xem phím tắt', keywords: 'keyboard shortcuts phim tat tro giup', kbd: ['?'], run: () => ctx.onHelp?.() },
     { id: 'act:signout', icon: 'logout', label: 'Đăng xuất', keywords: 'sign out logout thoat', run: () => ctx.onSignOut?.() },
@@ -190,7 +188,7 @@ const expenseItem = (e) => ({
   id: `exp:${e.id}`, group: 'Chi tiêu', icon: 'wallet',
   label: e.description || store.categoryById(e.category_id)?.name || 'Khoản chi',
   sub: `${money(e.amount)} · ${day(e.spent_on)}`, search: `${e.note || ''} ${store.categoryById(e.category_id)?.name || ''}`,
-  href: `#/expenses?q=${encodeURIComponent(e.description || '')}`,
+  href: `#/expenses?period=day&date=${encodeURIComponent(e.spent_on || '')}&focus=${encodeURIComponent(e.id)}`,
 });
 
 /* ------------------------------------------------------------------ */
@@ -240,7 +238,7 @@ export function openPalette(initial = '') {
         <span><kbd>↑</kbd><kbd>↓</kbd> chọn</span>
         <span><kbd>↵</kbd> mở</span>
         <span><kbd>Esc</kbd> đóng</span>
-        <span class="cmdk__brand">Note<em>_</em>mytasks</span>
+        <span class="cmdk__brand">Note_mytasks</span>
       </footer>
       <div class="sr-only" role="status" aria-live="polite" data-count></div>
     </dialog>`);
@@ -252,6 +250,7 @@ export function openPalette(initial = '') {
   let active = 0;
   let live = { tasks: [], notes: [], expenses: [] };
   let corpus = null;      // recent rows matched locally (accent-insensitive)
+  let failed = false;     // data search unavailable (all sources errored)
   let token = 0;
   let timerId = null;
 
@@ -261,11 +260,16 @@ export function openPalette(initial = '') {
       listTasks({ limit: 300 }),
       notesApi().then((m) => (m?.listNotes ? m.listNotes({ limit: 150 }) : [])),
       listExpenses({ limit: 150 }),
-    ]).then(([t, n, e]) => ({
-      tasks: t.status === 'fulfilled' ? t.value : [],
-      notes: n.status === 'fulfilled' ? n.value || [] : [],
-      expenses: e.status === 'fulfilled' ? e.value : [],
-    }));
+    ]).then(([t, n, e]) => {
+      // Every source failed (offline, expired session…): say so instead of
+      // pretending nothing matched. Pages and commands still work.
+      failed = [t, n, e].every((r) => r.status === 'rejected');
+      return {
+        tasks: t.status === 'fulfilled' ? t.value || [] : [],
+        notes: n.status === 'fulfilled' ? n.value || [] : [],
+        expenses: e.status === 'fulfilled' ? e.value || [] : [],
+      };
+    });
     return corpus;
   };
 
@@ -322,9 +326,14 @@ export function openPalette(initial = '') {
       </div>`)}`);
     if (!flat.length) {
       list.innerHTML = String(html`<div class="cmdk__empty">
-        <span class="eyebrow">Không có kết quả</span>
-        <p>Không tìm thấy “${q.trim()}”. Thử từ khóa ngắn hơn — dấu tiếng Việt không bắt buộc.</p>
+        <span class="cmdk__empty-icon" aria-hidden="true">${icon(failed ? 'alert' : 'search')}</span>
+        <strong>${failed ? 'Chưa tìm được trong dữ liệu' : 'Không có kết quả'}</strong>
+        <p>${failed
+          ? 'Không tải được công việc, ghi chú và khoản chi — kiểm tra kết nối rồi mở lại bảng lệnh.'
+          : html`Không tìm thấy “${q.trim()}”. Thử từ khóa ngắn hơn — dấu tiếng Việt không bắt buộc.`}</p>
       </div>`);
+    } else if (failed && q.trim()) {
+      list.insertAdjacentHTML('beforeend', String(html`<p class="cmdk__note" role="note">${icon('alert')} Không tải được dữ liệu — chỉ hiện trang và lệnh.</p>`));
     }
     status.textContent = q.trim() ? `${flat.length} kết quả` : '';
     setActive(active, false);

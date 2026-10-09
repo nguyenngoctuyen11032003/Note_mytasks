@@ -339,7 +339,7 @@ describe('timer / time entries service', () => {
     // timer without a task
     const free = await timer.start();
     expect(free.task_id).toBeNull();
-    expect((await timer.current()).task_total_seconds).toBeNull();
+    { const cur = await timer.current(); expect(cur.task_total_seconds).toBe(cur.elapsed_seconds); } // 001000: no task → total = elapsed
     await timer.stop();
   });
 
@@ -374,7 +374,7 @@ describe('timer / time entries service', () => {
 
     // running timer counts as [start, ∞)
     await timer.start(t.id);
-    await expectAppError(timer.logTime({ startedAt: minsAgo(5), endedAt: new Date() }), 'time_overlap');
+    await expectAppError(timer.logTime({ startedAt: minsAgo(5), endedAt: new Date(Date.now() + 30_000) }), 'time_overlap'); // +30 s: robust to host/Docker clock skew (server tolerates 60 s)
     await timer.stop();
 
     // update / delete entry keep actual_minutes in sync

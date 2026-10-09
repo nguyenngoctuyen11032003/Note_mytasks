@@ -4,6 +4,7 @@ import './css/layout.css';
 import './css/components.css';
 import './css/pages.css';
 import './css/theme.css';
+import './css/theme-f1.css';
 
 import { isConfigured } from './core/config.js';
 import * as store from './core/store.js';
@@ -26,6 +27,7 @@ import { errorState } from './components/states.js';
 import { notifyDataChanged } from './core/events.js';
 import { initLiquidGlass } from './components/liquidGlass.js';
 import { initMotion } from './components/motion.js';
+import { applySkin, currentSkin } from './components/skin.js';
 
 const app = document.getElementById('app');
 
@@ -104,7 +106,19 @@ async function render(opts) {
     return renderAuthPage(path.slice(1), query, token);
   }
   if (!PRIVATE[path]) {
-    return navigate(session ? homePath() : '/login', null, { replace: true });
+    if (!session) return navigate('/login', null, { replace: true });
+    if (path === '/' || path === '') return navigate(homePath(), null, { replace: true });
+    // Unknown route for a signed-in user: show the 404 page inside the shell.
+    if (!isMounted() || !content) {
+      content = mountShell(app, { onSignOut: doSignOut, onQuickAdd, onSearch: () => openPalette() });
+    }
+    setActive(path);
+    runCleanup();
+    content.removeAttribute('aria-busy');
+    const { renderNotFound } = await import('./pages/auth.js');
+    if (token !== renderToken) return;
+    renderNotFound(content, { path, home: homePath() });
+    return;
   }
   if (!session) {
     return navigate('/login', { next: path }, { replace: true });
@@ -126,8 +140,15 @@ async function render(opts) {
   try {
     const mod = await PRIVATE[path]();
     if (token !== renderToken) return;
-    cleanup = (await mod.default(content, { query, path })) || null;
-    if (token !== renderToken) return;
+    const dispose = (await mod.default(content, { query, path })) || null;
+    // A newer navigation started while this page was loading: tear this page
+    // down now, otherwise its listeners outlive it and the newer page's
+    // disposer could be overwritten.
+    if (token !== renderToken) {
+      try { if (typeof dispose === 'function') dispose(); } catch (e) { console.error(e); }
+      return;
+    }
+    cleanup = dispose;
     content.removeAttribute('aria-busy');
     if (restoreY) restoreScroll(restoreY, token);
     // Screen readers: announce the new page by focusing its heading — unless
@@ -409,6 +430,7 @@ function registerServiceWorker() {
   });
 }
 
+applySkin(currentSkin());
 initOfflineBanner();
 registerServiceWorker();
 boot();

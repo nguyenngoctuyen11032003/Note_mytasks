@@ -2,6 +2,7 @@
 import {
   db, run, rpc, pick, requireId, requireNonEmpty, vText, vNumber, vEnum, vDay, vUuidOrNull, numify, searchOr,
 } from './errors.js';
+import { today, addDays } from '../utils/date.js';
 
 export const PAYMENT_METHODS = {
   cash: 'Tiền mặt',
@@ -31,7 +32,8 @@ export function validateExpense(input, { partial = false } = {}) {
 const normalize = (rows) => numify(rows, ['amount']);
 const LIST_PAGE = 1000; // PostgREST max_rows
 
-export async function listExpenses({ from, to, categoryId, paymentMethod, search, minAmount, maxAmount, limit = 2000 } = {}) {
+export async function listExpenses(filters = {}) {
+  const { from, to, categoryId, paymentMethod, search, minAmount, maxAmount, limit = 2000 } = filters || {};
   let q = db().from('expenses').select(SELECT);
   if (from) q = q.gte('spent_on', vDay(from, 'from'));
   if (to) q = q.lte('spent_on', vDay(to, 'to'));
@@ -111,14 +113,16 @@ export async function suggestCategory(description) {
  * Lightweight recent history used on the client to learn categories and to
  * order "recent" chips (description, category, payment method). Newest first.
  */
-export async function listRecent({ days = 180, limit = 600 } = {}) {
+export async function listRecent(opts = {}) {
+  const { days = 180, limit = 600 } = opts || {};
   const d = vNumber(days, 'days', { min: 1, max: 3660, integer: true, label: 'Số ngày' }) ?? 180;
-  const from = new Date(Date.now() - d * 86400000).toISOString().slice(0, 10);
+  // spent_on is a calendar day in the user's timezone, not UTC.
+  const from = addDays(today(), -d);
   const q = db().from('expenses').select('id, amount, category_id, description, payment_method, spent_on, created_at')
     .gte('spent_on', from)
     .order('created_at', { ascending: false })
     .limit(Math.min(Math.max(Number(limit) || 600, 1), 2000));
-  return normalize(await run(q));
+  return normalize((await run(q)) || []);
 }
 
 /** Fetch specific expenses (e.g. the ones linked from shopping items). */

@@ -43,9 +43,8 @@ export default async function shoppingPage(root, { query }) {
 
   mount(root, html`
     ${pageHead({
-      num: '07',
       kicker: 'Mua sắm',
-      title: 'Danh sách <em>cần mua</em>',
+      title: 'Danh sách cần mua',
       lede: 'Lên kế hoạch trước khi chi. Chạm vào ô tròn khi đã mua — món được ghi thành khoản chi ngay, và bạn luôn có thể hoàn tác hay sửa giá thực tế.',
       actions: html`<button class="btn btn--primary" data-act="new">${icon('plus')} Thêm món</button>`,
     })}
@@ -53,7 +52,7 @@ export default async function shoppingPage(root, { query }) {
       <div class="sp-quick__bar">
         <span class="sp-quick__glyph" aria-hidden="true">${icon('cart')}</span>
         <input class="sp-quick__input" data-quick-input type="text" enterkeyhint="done" spellcheck="false"
-          placeholder="Thêm nhanh: sữa tắm 120k x2 · tai nghe 2,5tr !! · gạo 150k gấp" aria-label="Thêm nhanh món cần mua" aria-describedby="sp-quick-preview" />
+          placeholder="Thêm nhanh, ví dụ: sữa tắm 120k x2" aria-label="Thêm nhanh món cần mua" aria-describedby="sp-quick-preview" />
         <div class="segmented sp-quick__seg" role="group" aria-label="Thêm vào">
           <button type="button" data-qstatus="planned" aria-pressed="true">Cần mua</button>
           <button type="button" data-qstatus="wishlist" aria-pressed="false">Mong muốn</button>
@@ -181,6 +180,8 @@ export default async function shoppingPage(root, { query }) {
       ? html`<button type="button" data-group="priority" aria-pressed="${f.group === 'priority'}">Ưu tiên</button><button type="button" data-group="category" aria-pressed="${f.group === 'category'}">Danh mục</button>`
       : '');
     $('[data-groupby]').hidden = !isOpen({ status: tab });
+    // The purchased tab is always ordered by purchase date (grouped by month).
+    $('[data-f="sort"]').hidden = tab === 'purchased';
     if (!items.length) {
       mount($('[data-body]'), html`<div class="sheet">${emptyState({ art: 'cart', title: 'Danh sách đang trống', text: 'Gõ vào ô “Thêm nhanh” phía trên — ví dụ “sữa tắm 120k x2” — để mỗi lần chi tiêu đều có chủ đích.', action: html`<button class="btn btn--primary" data-act="new">${icon('plus')} Thêm món đầu tiên</button>` })}</div>`);
       return;
@@ -423,7 +424,20 @@ export default async function shoppingPage(root, { query }) {
       },
       async onSubmit(v) {
         const payload = { name: v.name, unit_price: v.unit_price ? parseMoney(v.unit_price) : 0, quantity: Number(v.quantity), status: v.status, priority: v.priority, category_id: v.category_id || null, url: v.url || null, note: v.note || null, purchased_on: v.status === 'purchased' ? i?.purchased_on || t0 : null };
-        if (i) await updateItem(i.id, payload); else await createItem(payload);
+        if (i && i.status === 'purchased' && payload.status !== 'purchased') {
+          // Leaving "purchased" un-does the purchase: offer to drop the filed expense so it isn't counted twice on re-buy.
+          let removeExpense = false;
+          if (i.expense_id) {
+            removeExpense = await confirmDialog({
+              title: 'Xóa khoản chi đã ghi?',
+              message: `“${i.name}” sẽ không còn ở mục Đã mua. Xóa luôn khoản chi ${money(spentOf(i))} đã ghi cho món này?`,
+              confirmLabel: 'Xóa khoản chi', cancelLabel: 'Giữ khoản chi',
+            });
+          }
+          await revertPurchase(i, { status: payload.status, removeExpense });
+          const { status, purchased_on, ...rest } = payload;
+          await updateItem(i.id, rest);
+        } else if (i) await updateItem(i.id, payload); else await createItem(payload);
         toast(i ? 'Đã lưu món.' : 'Đã thêm vào danh sách.');
         if (!i && payload.status !== tab) { tab = payload.status; setQuery({ tab: tab === 'planned' ? null : tab }); }
         if (alive) load();
@@ -495,7 +509,10 @@ export default async function shoppingPage(root, { query }) {
           { label: 'Sửa giá thực tế…', icon: 'coin', onClick: () => openActualForm(i) },
           { label: 'Xem khoản chi', icon: 'wallet', onClick: () => { location.hash = `#/expenses?period=day&date=${i.purchased_on}&focus=${i.expense_id}`; } },
         ] : []),
-        ...(i.status === 'purchased' ? [{ label: i.expense_id ? 'Hoàn tác mua (xóa khoản chi)' : 'Hoàn tác mua', icon: 'undo', onClick: () => undoBuy(i, 'planned') }] : []),
+        ...(i.status === 'purchased' ? [{ label: i.expense_id ? 'Hoàn tác mua (xóa khoản chi)' : 'Hoàn tác mua', icon: 'undo', onClick: async () => {
+          if (i.expense_id && !(await confirmDialog({ title: 'Hoàn tác mua?', message: `“${i.name}” trở lại danh sách cần mua và khoản chi ${money(spentOf(i))} đã ghi sẽ bị xóa.`, confirmLabel: 'Hoàn tác' }))) return;
+          undoBuy(i, 'planned');
+        } }] : []),
         'sep',
         ...['planned', 'wishlist', 'cancelled'].filter((s) => s !== i.status && i.status !== 'purchased').map((s) => ({ label: `Chuyển sang “${TAB_LABEL[s]}”`, icon: s === 'cancelled' ? 'x' : 'arrowRight', onClick: () => move(i, s) })),
         { label: 'Xóa', icon: 'trash', danger: true, onClick: () => removeItem(i) },

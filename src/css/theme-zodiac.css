@@ -1,0 +1,126 @@
+/* =====================================================================
+   Zodiac skins (cung hoàng đạo) — palettes only; the glass structure and
+   the light/dark mapping are shared from theme-f1.css. Each palette's main
+   hue is tagged with a five-element (ngũ hành) colour in utils/zodiac.js so
+   Settings can suggest skins that suit the user's destiny.
+
+   Per skin: --sk-paper / --sk-paper-l (dark / light page), --sk-accent /
+   --sk-accent-l (light accent is deeper so it reads on a pale page),
+   --hero-1..3 (accent stat panel), --glow-a / --glow-b (backdrop pools).
+   Only --sk-* / --hero-* / --glow-* are set here, so no specificity games.
+   ===================================================================== */
+
+/* Bạch Dương · Aries — scarlet (Hỏa) */
+html:root[data-skin='z-aries'] {
+  --sk-paper: #13080a;  --sk-paper-l: #fbf3f1;
+  --sk-accent: #ff5a3c; --sk-accent-l: #c8321a;
+  --hero-1: #1f0505; --hero-2: #7a0d0d; --hero-3: #e3271b;
+  --glow-a: rgba(255, 90, 50, 0.22); --glow-b: rgba(255, 150, 60, 0.14);
+}
+/* Kim Ngưu · Taurus — emerald (Mộc) */
+html:root[data-skin='z-taurus'] {
+  --sk-paper: #06120e;  --sk-paper-l: #f0f8f4;
+  --sk-accent: #3ddc97; --sk-accent-l: #0f8a57;
+  --hero-1: #03140d; --hero-2: #0d5a3c; --hero-3: #1fae73;
+  --glow-a: rgba(61, 220, 151, 0.18); --glow-b: rgba(255, 160, 180, 0.12);
+}
+/* Song Tử · Gemini — citrus yellow (Thổ) */
+html:root[data-skin='z-gemini'] {
+  --sk-paper: #11100a;  --sk-paper-l: #fbf8ec;
+  --sk-accent: #ffd23f; --sk-accent-l: #9a7400;
+  --hero-1: #1a1504; --hero-2: #6b5208; --hero-3: #d9a90f;
+  --glow-a: rgba(255, 210, 63, 0.2); --glow-b: rgba(120, 200, 255, 0.12);
+}
+/* Cự Giải · Cancer — pearl & moon silver (Kim) */
+html:root[data-skin='z-cancer'] {
+  --sk-paper: #0c0e14;  --sk-paper-l: #f3f5f9;
+  --sk-accent: #dfe6f0; --sk-accent-l: #4f5d75;
+  --hero-1: #10131a; --hero-2: #3a4252; --hero-3: #9aa6ba;
+  --glow-a: rgba(200, 215, 240, 0.22); --glow-b: rgba(150, 170, 210, 0.14);
+}
+/* Sư Tử · Leo — royal gold (Kim, ánh kim) */
+html:root[data-skin='z-leo'] {
+  --sk-paper: #120d05;  --sk-paper-l: #fbf6ec;
+  --sk-accent: #f2b632; --sk-accent-l: #a86f00;
+  --hero-1: #1c1204; --hero-2: #7a4f0b; --hero-3: #e89a1c;
+  --glow-a: rgba(242, 182, 50, 0.22); --glow-b: rgba(255, 110, 40, 0.12);
+}
+/* Xử Nữ · Virgo — sage & olive (Mộc) */
+html:root[data-skin='z-virgo'] {
+  --sk-paper: #0b100b;  --sk-paper-l: #f3f6ef;
+  --sk-accent: #a7c98a; --sk-accent-l: #4f7236;
+  --hero-1: #0d140b; --hero-2: #3c5530; --hero-3: #7f9f62;
+  --glow-a: rgba(167, 201, 138, 0.2); --glow-b: rgba(210, 190, 140, 0.14);
+}
+/* Thiên Bình · Libra — rose (Hỏa, hồng) */
+html:root[data-skin='z-libra'] {
+  --sk-paper: #130a10;  --sk-paper-l: #fbf2f6;
+  --sk-accent: #ff8fb8; --sk-accent-l: #c23a72;
+  --hero-1: #1c0812; --hero-2: #6e1f45; --hero-3: #d95b8c;
+  --glow-a: rgba(255, 143, 184, 0.2); --glow-b: rgba(190, 150, 255, 0.14);
+}
+/* Bọ Cạp · Scorpio — obsidian with garnet (Thủy, đen) */
+html:root[data-skin='z-scorpio'] {
+  --sk-paper: #07070c;  --sk-paper-l: #f5f3f6;
+  --sk-accent: #e0355a; --sk-accent-l: #b0173d;
+  --hero-1: #050508; --hero-2: #2a0a14; --hero-3: #8c1230;
+  --glow-a: rgba(140, 40, 75, 0.22); --glow-b: rgba(70, 70, 120, 0.16);
+}
+/* Nhân Mã · Sagittarius — violet (Hỏa, tím) */
+html:root[data-skin='z-sagittarius'] {
+  --sk-paper: #0d0916;  --sk-paper-l: #f5f2fb;
+  --sk-accent: #b48cff; --sk-accent-l: #6a3fd0;
+  --hero-1: #120a1f; --hero-2: #3d1f6e; --hero-3: #7b4ae0;
+  --glow-a: rgba(180, 140, 255, 0.22); --glow-b: rgba(255, 120, 170, 0.12);
+}
+/* Ma Kết · Capricorn — earth brown (Thổ) */
+html:root[data-skin='z-capricorn'] {
+  --sk-paper: #100c09;  --sk-paper-l: #f8f4ef;
+  --sk-accent: #d4a373; --sk-accent-l: #8a5a2e;
+  --hero-1: #160f0a; --hero-2: #4a3322; --hero-3: #9a6c45;
+  --glow-a: rgba(212, 163, 115, 0.2); --glow-b: rgba(140, 100, 65, 0.14);
+}
+/* Bảo Bình · Aquarius — electric cyan (Thủy) */
+html:root[data-skin='z-aquarius'] {
+  --sk-paper: #050e16;  --sk-paper-l: #eef7fb;
+  --sk-accent: #3fd0ff; --sk-accent-l: #0a7fae;
+  --hero-1: #031019; --hero-2: #0b4a6e; --hero-3: #1597d1;
+  --glow-a: rgba(63, 208, 255, 0.22); --glow-b: rgba(120, 100, 255, 0.12);
+}
+/* Song Ngư · Pisces — deep-sea blue with a lavender shimmer (Thủy) */
+html:root[data-skin='z-pisces'] {
+  --sk-paper: #04101a;  --sk-paper-l: #eef6fa;
+  --sk-accent: #5ec8e5; --sk-accent-l: #12749a;
+  --hero-1: #031420; --hero-2: #0d4466; --hero-3: #1f7fb8;
+  --glow-a: rgba(70, 170, 230, 0.24); --glow-b: rgba(170, 150, 255, 0.14);
+}
+
+/* =====================================================================
+   Settings picker (components/skinPicker.js). New class names only, so
+   unscoped: they style the picker in every skin, Coffee Glass included.
+   ===================================================================== */
+.skin-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: var(--s-2);
+}
+.skin-chip {
+  position: relative; display: flex; align-items: center; gap: var(--s-2);
+  min-height: 44px; padding: 6px 12px 6px 6px; border-radius: 14px; cursor: pointer;
+  background: var(--glass); box-shadow: var(--glass-edge); color: var(--ink-2); font-size: var(--fs-sm);
+  transition: background var(--t-fast), color var(--t-fast), transform var(--t-fast) var(--ease);
+}
+.skin-chip:hover { background: var(--glass-strong); color: var(--ink); }
+.skin-chip:active { transform: scale(0.97); }
+.skin-chip__sw {
+  flex: none; width: 32px; height: 32px; border-radius: 10px;
+  background:
+    radial-gradient(circle at 72% 28%, var(--sw-ac) 0 28%, transparent 30%),
+    linear-gradient(160deg, var(--sw-bg) 40%, color-mix(in srgb, var(--sw-ac) 35%, var(--sw-bg)) 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+.skin-chip__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skin-chip:has(input:checked) { background: var(--glass-strong); color: var(--ink); box-shadow: var(--glass-edge), inset 0 0 0 1.5px var(--accent); }
+.skin-chip:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.skin-birth { max-width: 220px; }
+.skin-advice { display: grid; gap: 6px; margin-top: var(--s-3); font-size: var(--fs-sm); line-height: 1.5; }
+.skin-advice__pick { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s-2) var(--s-3); }

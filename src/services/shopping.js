@@ -2,7 +2,7 @@
 // created (atomically, by RPC purchase_shopping_item). total_price is generated.
 import { today } from '../utils/date.js';
 import {
-  db, run, rpc, pick, requireId, requireNonEmpty, vText, vNumber, vEnum, vDay, vUrl, vUuidOrNull, numify, single, searchOr,
+  AppError, db, run, rpc, pick, requireId, requireNonEmpty, vText, vNumber, vEnum, vDay, vUrl, vUuidOrNull, numify, single, searchOr,
 } from './errors.js';
 
 export const SHOP_STATUS = { wishlist: 'Mong muốn', planned: 'Dự định mua', purchased: 'Đã mua', cancelled: 'Bỏ qua' };
@@ -38,7 +38,8 @@ const normalize = (rows) => numify(rows, ['unit_price', 'quantity', 'total_price
 const LIST_PAGE = 1000; // PostgREST max_rows
 const LIST_CAP = 5000;
 
-export async function listItems({ status, categoryId, search } = {}) {
+export async function listItems(filters = {}) {
+  const { status, categoryId, search } = filters || {};
   let q = db().from('shopping_items').select(SELECT);
   if (Array.isArray(status)) {
     if (status.length) q = q.in('status', status);
@@ -117,33 +118,61 @@ export async function markPurchased(item, { purchased_on = null, createExpenseRo
  * - actual ≠ planned → the expense created by the RPC is corrected afterwards.
  * Returns the updated shopping_items row.
  */
-export async function purchaseWithPrice(item, { actualTotal = null, spentOn = null, paymentMethod = 'cash', createExpense = true, expenseCategoryId = null } = {}) {
-  const id = typeof item === 'string' ? item : item?.id;
-  requireId(id);
-  const planned = Number(item?.total_price) || 0;
-  const qty = Math.max(1, Number(item?.quantity) || 1);
+export async function purchaseWithPrice(item, opts = {}) {
+  const { actualTotal = null, spentOn = null, paymentMethod = 'cash', createExpense = true, expenseCategoryId = null } = opts || {};
+  const it = await loadItem(item);
+  const id = it.id;
+  const planned = Number(it.total_price) || 0;
+  const qty = Math.max(1, Number(it.quantity) || 1);
   const actual = actualTotal == null || actualTotal === ''
     ? null
     : vNumber(actualTotal, 'actualTotal', { min: 0, max: 999_999_999_999.99, label: 'Giá thực tế' });
-  if (createExpense && planned <= 0 && actual > 0) {
+  // Re-purchase of an item that still has its expense: never file a second one.
+  const linked = it.expense_id || null;
+  const fileNew = createExpense !== false && !linked;
+  if (fileNew && planned <= 0 && actual > 0) {
+    // The RPC only files an expense when total_price > 0.
     await run(db().from('shopping_items').update({ unit_price: Math.round((actual / qty) * 100) / 100 }).eq('id', id));
   }
-  const row = await markPurchased(item, { purchased_on: spentOn, createExpenseRow: createExpense, expenseCategoryId, payment_method: paymentMethod });
-  if (createExpense && row?.expense_id && actual > 0 && planned > 0 && Math.abs(actual - planned) >= 0.01) {
-    await run(db().from('expenses').update({ amount: actual }).eq('id', row.expense_id));
+  const row = await markPurchased(it, { purchased_on: spentOn, createExpenseRow: fileNew, expenseCategoryId, payment_method: paymentMethod });
+  if (createExpense !== false && actual > 0) {
+    if (linked) {
+      await run(db().from('expenses').update({ amount: actual }).eq('id', linked));
+    } else if (row?.expense_id) {
+      // The RPC filed unit_price × quantity (possibly rounded); record what was actually paid.
+      const filed = Number(row.total_price) || 0;
+      if (Math.abs(actual - filed) >= 0.005) await run(db().from('expenses').update({ amount: actual }).eq('id', row.expense_id));
+    }
   }
   return row;
+}
+
+/** Item object as given, or fetched by id (when only an id / no expense_id is known). */
+async function loadItem(item) {
+  const id = typeof item === 'string' ? item : item?.id;
+  requireId(id);
+  if (typeof item === 'object' && item && 'expense_id' in item && 'total_price' in item) return item;
+  const row = await run(db().from('shopping_items').select(SHOP_COLS).eq('id', id).maybeSingle());
+  if (!row) throw new AppError('not_found');
+  return normalize(row);
 }
 
 /**
  * Undo a purchase: optionally delete the linked expense, then move the item
  * back to an open status (purchased_on cleared).
  */
-export async function revertPurchase(item, { status = 'planned', removeExpense = true } = {}) {
+export async function revertPurchase(item, opts = {}) {
+  const { status = 'planned', removeExpense = true } = opts || {};
   const id = typeof item === 'string' ? item : item?.id;
   requireId(id);
   const next = vEnum(status, 'status', STATUSES.filter((s) => s !== 'purchased'), { required: true, label: 'Trạng thái' });
-  if (removeExpense && item?.expense_id) await run(db().from('expenses').delete().eq('id', item.expense_id));
+  if (removeExpense) {
+    // An id (or an object without expense_id) → look the linked expense up first.
+    const expenseId = typeof item === 'object' && item && 'expense_id' in item
+      ? item.expense_id
+      : (await run(db().from('shopping_items').select('id, expense_id').eq('id', id).maybeSingle()))?.expense_id;
+    if (expenseId) await run(db().from('expenses').delete().eq('id', expenseId));
+  }
   return normalize(await run(db().from('shopping_items').update({ status: next, purchased_on: null }).eq('id', id).select(SELECT).single()));
 }
 

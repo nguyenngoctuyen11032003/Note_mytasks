@@ -1,6 +1,6 @@
 # Architecture — Personal Management Dashboard
 
-> Trạng thái: **Phase 1** (kiến trúc + database). Chưa có UI.
+> Trạng thái (2026-10-09): **đủ tính năng** — 11 trang (Tổng quan, Ghi chú, Công việc, Lịch, Thời gian, Mục tiêu KPI, Chi tiêu, Mua sắm, Báo cáo, Cài đặt + xác thực), giao diện “Coffee Glass”, PWA; migration 000100–000900; deploy GitHub Actions → GitHub Pages + Supabase. Các mục “Phase N” bên dưới là lịch sử thiết kế.
 
 ## 1. Tổng quan
 

@@ -5,6 +5,9 @@
 //   ?          shortcut help
 //   G then X   go to page (D N T C H K E S R)
 //   N          quick-add menu
+//   E          new expense (not on /tasks, where E edits the focused task)
+//   /          search (palette) — unless the page has its own search box
+//   Esc        closes dialogs, menus and the phone drawer (handled where they live)
 //
 // Pages own their single keys (tasks: N Shift+N / J K X E Enter Space Esc ?;
 // notes: N /; calendar: ← → T; time: Space F; expenses: /). A page handler on
@@ -19,7 +22,7 @@ import { html, fragment } from '../utils/dom.js';
 import { openModal } from './modal.js';
 import { NAV } from './shell.js';
 import { navigate, current } from '../core/router.js';
-import { GO_KEYS, MOD, togglePalette, isPaletteOpen } from './commandPalette.js';
+import { GO_KEYS, MOD, togglePalette, isPaletteOpen, openPalette } from './commandPalette.js';
 
 const SEQ_MS = 1200;
 
@@ -87,9 +90,17 @@ export function initShortcuts({ enabled, onQuickAdd }) {
     } else if (e.key === 'g' || e.key === 'G') {
       pendingG = Date.now();
       showHint(true);
-    } else if (e.key === 'n' || e.key === 'N') {
+    } else if ((e.key === 'n' || e.key === 'N') && !e.shiftKey) {
       e.preventDefault();
       onQuickAdd();
+    } else if ((e.key === 'e' || e.key === 'E') && !e.shiftKey && current().path !== '/tasks') {
+      // E — new expense. On the tasks page E edits the focused task instead.
+      e.preventDefault();
+      navigate('/expenses', { new: '1' });
+    } else if (e.key === '/') {
+      // Tasks / notes / expenses focus their own search first (preventDefault).
+      e.preventDefault();
+      openPalette();
     }
   };
 
@@ -148,6 +159,8 @@ export function openShortcutHelp() {
           <ul class="keys-list">
             ${row([MOD, '+', 'K'], 'Bảng lệnh & tìm kiếm')}
             ${row(['N'], 'Tạo mới…')}
+            ${row(['E'], 'Thêm khoản chi')}
+            ${row(['/'], 'Tìm kiếm')}
             ${row(['?'], 'Mở bảng phím tắt này')}
             ${row(['Esc'], 'Đóng hộp thoại / menu')}
           </ul>

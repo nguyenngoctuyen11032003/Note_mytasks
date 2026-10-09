@@ -8,6 +8,7 @@ import { makeChart, palette, series } from '../components/chart.js';
 import { toast } from '../components/toast.js';
 import { setQuery } from '../core/router.js';
 import { onDataChanged } from '../core/events.js';
+import { onThemeChange } from '../components/theme.js';
 import { productivityReport, financeReport, kpiReport, notesReport } from '../services/reports.js';
 import { PAYMENT_METHODS } from '../services/expenses.js';
 import { toCSV, downloadText } from '../utils/csv.js';
@@ -15,6 +16,7 @@ import { today, addDays, addMonths, startOfMonth, endOfMonth, startOfWeek, daysB
 import { money, moneyShort, minutes as fmtMinutes, hours, num, pct, dec, day, monthLabel, dateTime } from '../utils/format.js';
 
 const KINDS = [
+  { id: 'day', label: 'Ngày' },
   { id: 'week', label: 'Tuần' },
   { id: 'month', label: 'Tháng' },
   { id: 'quarter', label: 'Quý' },
@@ -32,6 +34,7 @@ const FORECAST = {
 };
 const KPI_STATUS = { active: 'Đang theo đuổi', paused: 'Tạm dừng', completed: 'Đã hoàn thành' };
 const MAX_DAYS = 731;
+const NOW_LABEL = { day: 'Hôm nay', week: 'Tuần này', month: 'Tháng này', quarter: 'Quý này', year: 'Năm nay' };
 
 const dm = (d) => `${d.slice(8)}/${d.slice(5, 7)}`;
 const dmy = (d) => `${dm(d)}/${d.slice(0, 4)}`;
@@ -45,7 +48,8 @@ const catName = (n) => n || 'Chưa phân loại';
 
 function periodOf(kind, anchor, custom) {
   let from, to;
-  if (kind === 'week') { from = startOfWeek(anchor); to = addDays(from, 6); }
+  if (kind === 'day') { from = anchor; to = anchor; }
+  else if (kind === 'week') { from = startOfWeek(anchor); to = addDays(from, 6); }
   else if (kind === 'month') { from = startOfMonth(anchor); to = endOfMonth(anchor); }
   else if (kind === 'quarter') {
     const m = Math.floor((Number(anchor.slice(5, 7)) - 1) / 3) * 3 + 1;
@@ -59,29 +63,35 @@ function periodOf(kind, anchor, custom) {
   const partial = from <= t0 && to > t0;
   const effTo = partial ? t0 : to;
   const len = diffDays(effTo, from) + 1;
-  const prevStart = kind === 'week' ? addDays(from, -7)
+  const prevStart = kind === 'day' ? addDays(from, -1)
+    : kind === 'week' ? addDays(from, -7)
     : kind === 'month' ? addMonths(from, -1)
     : kind === 'quarter' ? addMonths(from, -3)
     : kind === 'year' ? addMonths(from, -12)
     : addDays(from, -fullLen);
   // Like-for-like: an in-progress period is compared with the same number of
   // elapsed days at the start of the previous one.
-  let prevTo = addDays(prevStart, len - 1);
+  // A finished period is compared with the whole previous one (e.g. all of
+  // August, 31 days, for a finished September).
+  let prevTo = partial ? addDays(prevStart, len - 1) : addDays(from, -1);
   if (prevTo >= from) prevTo = addDays(from, -1);
 
   let title;
   const q = Math.floor((Number(from.slice(5, 7)) - 1) / 3) + 1;
-  if (kind === 'week') title = `Tuần ${dm(from)} – ${dmy(to)}`;
+  if (kind === 'day') title = from === t0 ? `Hôm nay, ${dmy(from)}` : from === addDays(t0, -1) ? `Hôm qua, ${dmy(from)}` : `${WEEKDAY_LONG[weekday(from)]}, ${dmy(from)}`;
+  else if (kind === 'week') title = `Tuần ${dm(from)} – ${dmy(to)}`;
   else if (kind === 'month') title = monthLabel(from);
   else if (kind === 'quarter') title = `Quý ${q} năm ${from.slice(0, 4)}`;
   else if (kind === 'year') title = `Năm ${from.slice(0, 4)}`;
   else title = `${dmy(from)} – ${dmy(to)}`;
-  const noun = { week: 'tuần', month: 'tháng', quarter: 'quý', year: 'năm' }[kind] || 'kỳ';
+  const noun = { day: 'ngày', week: 'tuần', month: 'tháng', quarter: 'quý', year: 'năm' }[kind] || 'kỳ';
 
-  return { kind, from, to: effTo, fullTo: to, len, partial, future: from > t0, prevFrom: prevStart, prevTo, title, noun };
+  const prevLen = diffDays(prevTo, prevStart) + 1;
+  return { kind, from, to: effTo, fullTo: to, len, prevLen, partial, future: from > t0, prevFrom: prevStart, prevTo, title, noun };
 }
 
 function shiftAnchor(kind, anchor, dir, custom) {
+  if (kind === 'day') return addDays(anchor, dir);
   if (kind === 'week') return addDays(anchor, 7 * dir);
   if (kind === 'month') return addMonths(anchor, dir);
   if (kind === 'quarter') return addMonths(anchor, 3 * dir);
@@ -104,6 +114,28 @@ function bucketize(points, from, to, mode) {
 const bucketLabel = (k, mode) => (mode === 'month' ? `T${Number(k.slice(5, 7))}/${k.slice(2, 4)}` : dm(k));
 const bucketTitle = (k, mode) => (mode === 'day' ? day(k, 'weekday') : mode === 'week' ? `Tuần từ ${day(k)}` : monthLabel(k));
 const fit = (arr, n) => Array.from({ length: n }, (_, i) => (i < arr.length ? arr[i] : null));
+
+/**
+ * Mirror of the slice toning in components/chart.js (doughnut colours are
+ * nudged toward the warm palette there), so legend dots match the chart.
+ */
+function tone(c) {
+  const m = typeof c === 'string' && /^#([0-9a-f]{6})$/i.exec(c.trim());
+  if (!m) return c;
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2;
+  let h = 0, s = 0;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    h *= 60;
+  }
+  const dh = ((28 - h + 540) % 360) - 180;
+  const H = (h + dh * 0.3 + 360) % 360, S = Math.min(s, 0.5) * 100, L = Math.min(Math.max(l, 0.42), 0.66) * 100;
+  return `hsl(${H.toFixed(0)} ${S.toFixed(0)}% ${L.toFixed(0)}%)`;
+}
 
 function cycleText(h) {
   if (h == null) return '—';
@@ -131,9 +163,7 @@ export default async function reportsPage(root, { query }) {
 
   mount(root, html`
     ${pageHead({
-      num: '08',
-      kicker: 'Báo cáo',
-      title: 'Nhìn lại để <em>đi tiếp</em>',
+      title: 'Báo cáo',
       lede: 'Năng suất, thời gian, tài chính, mục tiêu và ghi chú trong một kỳ — có so sánh với kỳ trước, tóm tắt bằng lời và bản in gọn gàng.',
       actions: html`
         <button type="button" class="btn" data-act="csv-menu" aria-haspopup="menu">${icon('download')} Xuất CSV</button>
@@ -147,7 +177,8 @@ export default async function reportsPage(root, { query }) {
         <button type="button" class="icon-btn" data-act="prev" aria-label="Kỳ trước">${icon('chevronLeft')}</button>
         <strong class="rp-nav__title" data-title aria-live="polite"></strong>
         <button type="button" class="icon-btn" data-act="next" aria-label="Kỳ sau">${icon('chevronRight')}</button>
-        <button type="button" class="btn btn--sm btn--ghost" data-act="now">Hiện tại</button>
+        <button type="button" class="btn btn--sm btn--ghost" data-act="now">${NOW_LABEL[kind] || 'Hiện tại'}</button>
+        <button type="button" class="btn btn--sm btn--ghost" data-act="last-month" title="Xem nhanh tháng trước">Tháng trước</button>
       </div>
       <form class="rp-custom" data-custom ${kind === 'custom' ? '' : raw('hidden')}>
         <input class="input input--sm" type="date" name="from" aria-label="Từ ngày" max="${t0}" />
@@ -161,38 +192,38 @@ export default async function reportsPage(root, { query }) {
 
     <article class="report" data-report>
       <header class="rp-print-head" aria-hidden="true">
-        <span class="eyebrow">Note_mytasks · Báo cáo</span>
+        <span class="rp-print-brand">Note_mytasks · Báo cáo</span>
         <h1 data-print-title></h1>
         <p data-print-meta></p>
       </header>
 
       <section class="rp-sec rp-sec--summary" data-sec="summary" aria-labelledby="rp-h-summary">
-        ${secHead('01', 'Tóm tắt', 'Diễn giải tự động từ các con số bên dưới.', 'summary', 'rp-h-summary')}
+        ${secHead('Tóm tắt', 'Diễn giải tự động từ các con số bên dưới.', 'summary', 'rp-h-summary')}
         <div class="rp-summary" data-body>${loadingBlock(96)}</div>
       </section>
 
       <section class="rp-sec" data-sec="prod" aria-labelledby="rp-h-prod">
-        ${secHead('02', 'Năng suất', 'Công việc hoàn thành, tỉ lệ hoàn thành, đúng hạn và chu kỳ xử lý.', 'prod', 'rp-h-prod')}
+        ${secHead('Năng suất', 'Công việc hoàn thành, tỉ lệ hoàn thành, đúng hạn và chu kỳ xử lý.', 'prod', 'rp-h-prod')}
         <div data-body><div class="rp-tiles">${statTileSkeleton(5)}</div>${loadingBlock(240)}</div>
       </section>
 
       <section class="rp-sec" data-sec="time" aria-labelledby="rp-h-time">
-        ${secHead('03', 'Thời gian', 'Giờ ghi nhận theo ngày và theo danh mục công việc.', 'time', 'rp-h-time')}
+        ${secHead('Thời gian', 'Giờ ghi nhận theo ngày và theo danh mục công việc.', 'time', 'rp-h-time')}
         <div data-body><div class="rp-tiles">${statTileSkeleton(4)}</div>${loadingBlock(240)}</div>
       </section>
 
       <section class="rp-sec" data-sec="fin" aria-labelledby="rp-h-fin">
-        ${secHead('04', 'Tài chính', 'Chi tiêu theo danh mục, xu hướng theo ngày, mức tuân thủ ngân sách và 10 khoản lớn nhất.', 'fin', 'rp-h-fin')}
+        ${secHead('Tài chính', 'Chi tiêu theo danh mục, xu hướng theo ngày, mức tuân thủ ngân sách và 10 khoản lớn nhất.', 'fin', 'rp-h-fin')}
         <div data-body><div class="rp-tiles">${statTileSkeleton(4)}</div>${loadingBlock(260)}</div>
       </section>
 
       <section class="rp-sec" data-sec="kpi" aria-labelledby="rp-h-kpi">
-        ${secHead('05', 'Mục tiêu KPI', 'Tiến độ hiện tại, thay đổi trong kỳ và dự báo hoàn thành.', 'kpi', 'rp-h-kpi')}
+        ${secHead('Mục tiêu KPI', 'Tiến độ hiện tại, thay đổi trong kỳ và dự báo hoàn thành.', 'kpi', 'rp-h-kpi')}
         <div data-body>${loadingBlock(160)}</div>
       </section>
 
       <section class="rp-sec" data-sec="notes" aria-labelledby="rp-h-notes">
-        ${secHead('06', 'Ghi chú', 'Số ghi chú bạn đã viết trong kỳ.', 'notes', 'rp-h-notes')}
+        ${secHead('Ghi chú', 'Số ghi chú bạn đã viết trong kỳ.', 'notes', 'rp-h-notes')}
         <div data-body>${loadingBlock(120)}</div>
       </section>
     </article>`);
@@ -209,7 +240,10 @@ export default async function reportsPage(root, { query }) {
     form.elements.to.value = custom.to;
     const next = periodOf(kind, kind === 'custom' ? t0 : shiftAnchor(kind, anchor, 1), kind === 'custom' ? shiftAnchor(kind, null, 1, custom) : null);
     $('[data-act="next"]').disabled = next.from > t0;
-    $('[data-act="now"]').hidden = kind === 'custom' || (P && P.from <= t0 && P.fullTo >= t0);
+    const nowBtn = $('[data-act="now"]');
+    nowBtn.textContent = NOW_LABEL[kind] || 'Hiện tại';
+    nowBtn.hidden = kind === 'custom' || (P && P.from <= t0 && P.fullTo >= t0);
+    $('[data-act="last-month"]').hidden = kind === 'month' && P && P.from === addMonths(startOfMonth(t0), -1);
   }
 
   function persistQuery() {
@@ -223,7 +257,16 @@ export default async function reportsPage(root, { query }) {
   }
 
   /* ---------- loading ---------- */
-  async function load() {
+  const SKELETONS = {
+    prod: () => html`<div class="rp-tiles">${statTileSkeleton(5)}</div>${loadingBlock(240)}`,
+    time: () => html`<div class="rp-tiles">${statTileSkeleton(4)}</div>${loadingBlock(240)}`,
+    fin: () => html`<div class="rp-tiles">${statTileSkeleton(4)}</div>${loadingBlock(260)}`,
+    kpi: () => loadingBlock(160),
+    notes: () => loadingBlock(120),
+  };
+
+  /** quiet = background refresh after a data change: keep the current content until new data arrives. */
+  async function load({ quiet = false } = {}) {
     const token = ++loadToken;
     P = periodOf(kind, anchor, custom);
     syncControls();
@@ -235,15 +278,19 @@ export default async function reportsPage(root, { query }) {
       <span>${num(P.len)} ngày${P.partial ? ' · tính đến hôm nay' : ''}</span>
       ${cmp && !P.future ? html`<span>so với ${dm(P.prevFrom)} – ${dmy(P.prevTo)}</span>` : ''}`);
 
-    Object.keys(charts).forEach(killCharts);
+    if (!quiet) {
+      Object.keys(charts).forEach(killCharts);
+      Object.entries(SKELETONS).forEach(([sec, sk]) => mount(body(sec), sk()));
+    }
     if (P.future) {
+      Object.keys(charts).forEach(killCharts);
       ['summary', 'prod', 'time', 'fin', 'kpi', 'notes'].forEach((s) => mount(body(s), s === 'summary'
-        ? emptyState({ art: 'chart', title: 'Kỳ này chưa bắt đầu', text: 'Hãy chọn một kỳ đã diễn ra hoặc bấm “Hiện tại”.', small: true })
+        ? emptyState({ art: 'chart', title: 'Kỳ này chưa bắt đầu', text: 'Hãy chọn một kỳ đã diễn ra hoặc quay về kỳ hiện tại.', small: true })
         : html``));
       return;
     }
     Object.keys(S).forEach((k) => { S[k] = undefined; });
-    mount(body('summary'), loadingBlock(96));
+    if (!quiet) mount(body('summary'), loadingBlock(96));
 
     // The previous period is always loaded (the narrative uses it); `cmp`
     // only toggles the visible comparison (deltas, dashed series, columns).
@@ -296,8 +343,8 @@ export default async function reportsPage(root, { query }) {
       <div class="stat__meta">${meta}</div>
     </div>`;
 
-  const chartOpts = (mode, keys, fmt) => ({
-    scales: { y: { ticks: { callback: (v) => fmt(v, true) } } },
+  const chartOpts = (mode, keys, fmt, integer) => ({
+    scales: { y: { ticks: { callback: (v) => fmt(v, true), ...(integer ? { precision: 0 } : {}) } } },
     plugins: {
       tooltip: {
         callbacks: {
@@ -308,7 +355,7 @@ export default async function reportsPage(root, { query }) {
     },
   });
 
-  function trendChart(el, { cur, prev, mode, color, label, fmt, highlightMax = false }) {
+  function trendChart(el, { cur, prev, mode, color, label, fmt, highlightMax = false, integer = false }) {
     const p = palette();
     const max = Math.max(...cur.values);
     const datasets = [{
@@ -319,10 +366,10 @@ export default async function reportsPage(root, { query }) {
     if (cmp && prev) {
       datasets.push({
         type: 'line', label: 'Kỳ trước', data: fit(prev.values, cur.keys.length),
-        borderColor: p.ink3, borderDash: [4, 4], borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 3, tension: 0.25, spanGaps: true, order: 1,
+        borderColor: p.ink3, borderDash: [4, 4], borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 3, tension: integer ? 0 : 0.25, spanGaps: true, order: 1,
       });
     }
-    return makeChart(el, { type: 'bar', data: { labels: cur.keys.map((k) => bucketLabel(k, mode)), datasets }, options: chartOpts(mode, cur.keys, fmt) });
+    return makeChart(el, { type: 'bar', data: { labels: cur.keys.map((k) => bucketLabel(k, mode)), datasets }, options: chartOpts(mode, cur.keys, fmt, integer) });
   }
 
   function doughnut(el, rows, fmt) {
@@ -340,9 +387,9 @@ export default async function reportsPage(root, { query }) {
   };
 
   const legend = (rows, fmt, total) => html`<div class="legend rp-legend">${rows.map((r) => html`
-    <div class="legend__row"><span class="legend__dot" style="--c:${r.color}"></span><span class="truncate">${r.name}</span><span class="legend__val">${fmt(r.v)}</span><span class="legend__pct">${total ? pct((r.v / total) * 100) : '—'}</span></div>`)}</div>`;
+    <div class="legend__row"><span class="legend__dot" style="--c:${tone(r.color)}"></span><span class="truncate">${r.name}</span><span class="legend__val">${fmt(r.v)}</span><span class="legend__pct">${total ? pct((r.v / total) * 100) : '—'}</span></div>`)}</div>`;
 
-  /* ---------- § 02 Productivity ---------- */
+  /* ---------- Productivity ---------- */
   function renderProd() {
     killCharts('prod');
     const { cur, prev } = S.prod;
@@ -382,7 +429,7 @@ export default async function reportsPage(root, { query }) {
 
     const p = palette();
     const tEl = body('prod').querySelector('[data-c="trend"]');
-    if (tEl) charts.prod.push(trendChart(tEl, { cur: curB, prev: prevB, mode, color: p.moss, label: 'Hoàn thành', fmt: (v) => num(v) }));
+    if (tEl) charts.prod.push(trendChart(tEl, { cur: curB, prev: prevB, mode, color: p.moss, label: 'Hoàn thành', fmt: (v) => num(v), integer: true }));
     const wEl = body('prod').querySelector('[data-c="weekday"]');
     if (wEl) {
       const max = Math.max(...wd);
@@ -395,7 +442,7 @@ export default async function reportsPage(root, { query }) {
     renderTime();
   }
 
-  /* ---------- § 03 Time ---------- */
+  /* ---------- Time ---------- */
   function renderTime() {
     killCharts('time');
     const { cur, prev } = S.prod;
@@ -414,7 +461,7 @@ export default async function reportsPage(root, { query }) {
     mount(body('time'), html`
       <div class="rp-tiles">
         ${tile({ label: 'Tổng giờ', ic: 'clock', value: hours(mins), meta: delta(mins, prevMins), accent: true })}
-        ${tile({ label: 'Trung bình / ngày', ic: 'timer', value: fmtMinutes(mins / P.len), small: true, meta: delta(mins / P.len, prevMins == null ? null : prevMins / P.len) })}
+        ${tile({ label: 'Trung bình / ngày', ic: 'timer', value: fmtMinutes(mins / P.len), small: true, meta: delta(mins / P.len, prevMins == null ? null : prevMins / P.prevLen) })}
         ${tile({ label: 'Ngày có ghi giờ', ic: 'calendar', value: html`${num(activeDays)}<small>/ ${num(P.len)}</small>`, meta: delta(activeDays, prevActive) || html`<span>${pct((activeDays / P.len) * 100)} số ngày</span>` })}
         ${tile({ label: 'Danh mục chính', ic: 'tag', value: top ? top.name : '—', small: true, meta: top ? html`<span>${fmtMinutes(top.v)} · ${pct((top.v / mins) * 100)}</span>` : html`<span>Chưa có giờ ghi nhận</span>` })}
       </div>
@@ -435,7 +482,7 @@ export default async function reportsPage(root, { query }) {
     if (cEl) charts.time.push(doughnut(cEl, cats, fmtMinutes));
   }
 
-  /* ---------- § 04 Finance ---------- */
+  /* ---------- Finance ---------- */
   function renderFin() {
     killCharts('fin');
     const f = S.fin;
@@ -451,10 +498,10 @@ export default async function reportsPage(root, { query }) {
     mount(body('fin'), html`
       <div class="rp-tiles">
         ${tile({ label: 'Tổng chi', ic: 'wallet', value: money(f.total, { compact: true }), meta: delta(f.total, f.prev_total, { invert: true }), accent: true })}
-        ${tile({ label: 'Trung bình / ngày', ic: 'coin', value: money(f.daily_avg, { compact: true }), small: true, meta: delta(f.daily_avg, f.prev_total / P.len, { invert: true }) })}
+        ${tile({ label: 'Trung bình / ngày', ic: 'coin', value: money(f.daily_avg, { compact: true }), small: true, meta: delta(f.daily_avg, f.prev_total / P.prevLen, { invert: true }) })}
         ${tile({ label: 'Số khoản chi', ic: 'list', value: num(f.count), meta: delta(f.count, f.prev_count, { invert: true }) })}
         ${tile({
-          label: 'Ngân sách đã dùng', ic: 'piggy',
+          label: P.partial ? 'So với nhịp ngân sách' : 'Ngân sách đã dùng', ic: 'piggy',
           value: used == null ? '—' : pct(used),
           meta: used == null
             ? html`<span>${f.budget.has_any ? 'Chỉ có ngân sách theo danh mục' : 'Chưa đặt ngân sách'}</span>`
@@ -488,26 +535,26 @@ export default async function reportsPage(root, { query }) {
               <td><span class="cat" style="--c:${c.color || 'var(--ink-4)'}"><span class="cat__dot"></span><span class="truncate">${catName(c.name)}</span></span></td>
               <td class="r num">${num(c.count)}</td>
               <td class="r num"><strong>${money(c.total)}</strong></td>
-              <td class="rp-col-share"><div class="row" style="gap:8px">${bar((c.total / maxCat) * 100, { thin: true, color: c.color || undefined })}<span class="num faint rp-pct">${pct(c.pct)}</span></div></td>
+              <td class="rp-col-share"><div class="rp-share">${bar((c.total / maxCat) * 100, { thin: true, color: c.color || undefined })}<span class="num faint rp-pct">${pct(c.pct)}</span></div></td>
               <td class="r num muted">${c.budget ? money(c.budget) : '—'}</td>
               <td class="r">${u == null ? html`<span class="faint">—</span>` : html`<span class="badge badge--${u > 100 ? 'danger' : u >= 80 ? 'warning' : 'success'}">${pct(u)}</span>`}</td>
-              ${cmp ? html`<td class="r num muted">${money(c.prev_total)}</td><td class="r">${ch == null ? html`<span class="faint">${c.total ? 'mới' : '—'}</span>` : html`<span class="delta ${ch > 0 ? 'delta--down' : 'delta--up'}">${ch > 0 ? '+' : ''}${pct(ch)}</span>`}</td>` : ''}
+              ${cmp ? html`<td class="r num muted">${money(c.prev_total)}</td><td class="r">${ch == null ? html`<span class="faint">${c.total ? 'mới' : '—'}</span>` : Math.abs(ch) < 0.05 ? html`<span class="delta rp-delta--flat">±0</span>` : html`<span class="delta ${ch > 0 ? 'delta--down' : 'delta--up'}">${ch > 0 ? '+' : ''}${pct(ch)}</span>`}</td>` : ''}
             </tr>`;
           })}</tbody>
           <tfoot><tr><td><strong>Tổng</strong></td><td class="r num">${num(f.count)}</td><td class="r num"><strong>${money(f.total)}</strong></td><td class="rp-col-share"></td><td class="r num muted">${f.budget.overall ? money(f.budget.overall) : '—'}</td><td class="r">${used == null ? '' : html`<span class="badge badge--${used > 100 ? 'danger' : used >= 80 ? 'warning' : 'success'}">${pct(used)}</span>`}</td>${cmp ? html`<td class="r num muted">${money(f.prev_total)}</td><td class="r">${f.change_pct == null ? '' : html`<span class="delta ${f.change_pct > 0 ? 'delta--down' : 'delta--up'}">${f.change_pct > 0 ? '+' : ''}${pct(f.change_pct)}</span>`}</td>` : ''}</tr></tfoot>
         </table></div>
-        ${f.budget.has_any ? html`<p class="rp-foot">Ngân sách tháng được phân bổ theo số ngày của kỳ${P.partial ? ' (đến hôm nay)' : ''}.${over.length ? html` <strong class="rp-bad">Vượt ngân sách: ${over.map((c) => catName(c.name)).join(', ')}.</strong>` : ''}</p>` : ''}
+        ${f.budget.has_any ? html`<p class="rp-foot">Ngân sách tháng được phân bổ theo số ngày của kỳ${P.partial ? ' (đến hôm nay)' : ''}.${over.length ? html` <strong class="rp-bad">${P.partial ? 'Chi nhanh hơn nhịp' : 'Vượt ngân sách'}: ${over.map((c) => catName(c.name)).join(', ')}.</strong>` : ''}</p>` : ''}
 
         <h3 class="rp-sub">10 khoản chi lớn nhất</h3>
-        ${f.top.length ? html`<div class="table-wrap rp-table"><table class="table">
+        ${f.top.length ? html`<div class="table-wrap rp-table rp-cards rp-cards--top"><table class="table">
           <thead><tr><th class="rp-rank">#</th><th>Ngày</th><th>Mô tả</th><th>Danh mục</th><th>Thanh toán</th><th class="r">Số tiền</th></tr></thead>
           <tbody>${f.top.map((x, i) => html`<tr>
-            <td class="num faint rp-rank">${String(i + 1).padStart(2, '0')}</td>
-            <td class="num">${dm(x.spent_on)}</td>
-            <td class="rp-desc">${x.description || html`<span class="faint">Không mô tả</span>`}</td>
-            <td><span class="cat" style="--c:${x.category?.color || 'var(--ink-4)'}"><span class="cat__dot"></span><span class="truncate">${catName(x.category?.name)}</span></span></td>
-            <td class="muted">${PAYMENT_METHODS[x.payment_method] || x.payment_method}</td>
-            <td class="r num"><strong>${money(x.amount)}</strong></td>
+            <td class="num faint rp-rank" data-cell="rank">${i + 1}</td>
+            <td class="num muted" data-cell="date">${dm(x.spent_on)}</td>
+            <td class="rp-desc" data-cell="desc">${x.description || html`<span class="faint">Không mô tả</span>`}</td>
+            <td data-cell="cat"><span class="cat" style="--c:${x.category?.color || 'var(--ink-4)'}"><span class="cat__dot"></span><span class="truncate">${catName(x.category?.name)}</span></span></td>
+            <td class="muted" data-cell="pay">${PAYMENT_METHODS[x.payment_method] || x.payment_method}</td>
+            <td class="r num" data-cell="amt"><strong>${money(x.amount)}</strong></td>
           </tr>`)}</tbody></table></div>` : html`<p class="rp-empty">Không có khoản chi trong kỳ.</p>`}`
       : emptyState({ art: 'wallet', title: 'Không có khoản chi', text: 'Kỳ này và kỳ trước chưa ghi nhận khoản chi nào.', small: true })}`);
 
@@ -537,7 +584,7 @@ export default async function reportsPage(root, { query }) {
     }
   }
 
-  /* ---------- § 05 KPI ---------- */
+  /* ---------- KPI ---------- */
   function renderKpi() {
     const list = S.kpi;
     if (!list.length) {
@@ -558,23 +605,23 @@ export default async function reportsPage(root, { query }) {
         ${tile({ label: 'Cần chú ý', ic: 'alert', value: num(counts.risk + counts.off), meta: html`<span>${num(counts.risk)} rủi ro · ${num(counts.off)} chậm</span>` })}
         ${tile({ label: 'Cập nhật trong kỳ', ic: 'history', value: html`${num(updated)}<small>/ ${num(list.length)}</small>`, meta: html`<span>KPI có bản ghi mới</span>` })}
       </div>
-      <div class="table-wrap rp-table"><table class="table">
+      <div class="table-wrap rp-table rp-cards rp-cards--kpi"><table class="table">
         <thead><tr><th>KPI</th><th class="rp-col-share">Tiến độ</th><th class="r">Hiện tại / Mục tiêu</th><th class="r">Thay đổi trong kỳ</th><th class="r">Bản ghi</th><th>Dự báo</th><th class="r">Hạn</th></tr></thead>
         <tbody>${list.map((k) => {
           const fc = FORECAST[k.forecast_status];
           return html`<tr>
-            <td><strong>${k.name}</strong><div class="faint rp-mini">${KPI_STATUS[k.status] || k.status}</div></td>
-            <td class="rp-col-share"><div class="row" style="gap:8px">${bar(k.progress, { thin: true, color: k.progress >= 100 ? 'var(--moss)' : 'var(--accent)' })}<span class="num rp-pct">${pct(k.progress)}</span></div></td>
-            <td class="r num">${dec(k.current_value)} / ${dec(k.target_value)} ${k.unit}</td>
-            <td class="r num">${k.records_in_period ? html`<span class="${k.change > 0 ? 'rp-good' : k.change < 0 ? 'rp-bad' : ''}">${k.change > 0 ? '+' : ''}${dec(k.change)} ${k.unit}</span>` : html`<span class="faint">—</span>`}</td>
-            <td class="r num">${num(k.records_in_period)}</td>
-            <td>${fc ? html`<span class="badge badge--${fc.badge}">${fc.label}</span>${k.projected_completion && k.forecast_status !== 'achieved' ? html`<div class="faint rp-mini">Dự kiến đạt ${day(k.projected_completion, 'medium')}</div>` : ''}` : html`<span class="faint">—</span>`}</td>
-            <td class="r num muted">${k.end_date ? dmy(k.end_date) : '—'}</td>
+            <td class="rp-kpi-name" data-cell="name"><strong>${k.name}</strong><div class="faint rp-mini">${KPI_STATUS[k.status] || k.status}</div></td>
+            <td class="rp-col-share" data-cell="share"><div class="rp-share">${bar(k.progress, { thin: true, color: k.progress >= 100 ? 'var(--moss)' : 'var(--accent)' })}<span class="num rp-pct">${pct(k.progress)}</span></div></td>
+            <td class="r num" data-cell="val">${dec(k.current_value)} / ${dec(k.target_value)} ${k.unit}</td>
+            <td class="r num" data-cell="chg" data-label="Trong kỳ">${k.records_in_period ? html`<span class="${k.change > 0 ? 'rp-good' : k.change < 0 ? 'rp-bad' : ''}">${k.change > 0 ? '+' : ''}${dec(k.change)} ${k.unit}</span>` : html`<span class="faint">—</span>`}</td>
+            <td class="r num" data-cell="rec">${num(k.records_in_period)}</td>
+            <td data-cell="fc">${fc ? html`<span class="badge badge--${fc.badge}">${fc.label}</span>${k.projected_completion && k.forecast_status !== 'achieved' ? html`<div class="faint rp-mini">Dự kiến đạt ${day(k.projected_completion, 'medium')}</div>` : ''}` : html`<span class="faint">—</span>`}</td>
+            <td class="r num muted" data-cell="due" data-label="Hạn">${k.end_date ? dmy(k.end_date) : '—'}</td>
           </tr>`;
         })}</tbody></table></div>`);
   }
 
-  /* ---------- § 06 Notes ---------- */
+  /* ---------- Notes ---------- */
   function renderNotes() {
     killCharts('notes');
     const n = S.notes;
@@ -585,7 +632,7 @@ export default async function reportsPage(root, { query }) {
     const mode = modeFor(P.len);
     const curB = bucketize(n.by_day.map((x) => ({ day: x.day, v: x.count })), P.from, P.to, mode);
     mount(body('notes'), html`
-      <div class="rp-grid">
+      <div class="rp-grid rp-grid--notes">
         <div class="rp-tiles rp-tiles--stack">
           ${tile({ label: 'Ghi chú mới', ic: 'note', value: num(n.count), meta: delta(n.count, n.prev), accent: true })}
           ${tile({ label: 'Tổng số ghi chú', ic: 'archive', value: num(n.total), meta: html`<span>không tính thùng rác</span>` })}
@@ -597,16 +644,17 @@ export default async function reportsPage(root, { query }) {
         </figure>
       </div>`);
     const el = body('notes').querySelector('[data-c="trend"]');
-    if (el) charts.notes.push(trendChart(el, { cur: curB, prev: null, mode, color: palette().plum, label: 'Ghi chú', fmt: (v) => num(v) }));
+    if (el) charts.notes.push(trendChart(el, { cur: curB, prev: null, mode, color: palette().plum, label: 'Ghi chú', fmt: (v) => num(v), integer: true }));
   }
 
-  /* ---------- § 01 Summary ---------- */
+  /* ---------- Summary ---------- */
   function summaryParts() {
     const out = [];
     const tips = [];
     const facts = []; // [label, cur, prev] for CSV
     const prd = S.prod;
-    const when = P.partial && P.kind !== 'custom' ? `Từ đầu ${P.noun} đến nay`
+    const when = P.kind === 'day' ? (P.from === t0 ? 'Hôm nay' : `Ngày ${dmy(P.from)}`)
+      : P.partial && P.kind !== 'custom' ? `Từ đầu ${P.noun} đến nay`
       : P.kind === 'custom' ? 'Trong khoảng thời gian này'
       : `Trong ${P.title.charAt(0).toLowerCase()}${P.title.slice(1)}`;
     const trend = (cur, prev, up = 'tăng', down = 'giảm') => {
@@ -624,7 +672,7 @@ export default async function reportsPage(root, { query }) {
       } else {
         out.push(html`${when}, chưa có công việc nào được đánh dấu hoàn thành.`);
       }
-      if (prd.cur.busiest_weekday != null) out.push(html` Ngày làm việc hiệu quả nhất là <strong>${WEEKDAY_LONG[prd.cur.busiest_weekday]}</strong>.`);
+      if (prd.cur.busiest_weekday != null && P.kind !== 'day') out.push(html` Ngày làm việc hiệu quả nhất là <strong>${WEEKDAY_LONG[prd.cur.busiest_weekday]}</strong>.`);
       if (prd.cur.completion_rate != null && prd.cur.completion_rate < 0.5) tips.push('số việc tạo mới đang nhiều hơn số việc hoàn thành — cân nhắc thu gọn danh sách hoặc chia nhỏ việc lớn');
       if (prd.cur.on_time_rate != null && prd.cur.on_time_rate < 0.6) tips.push('nhiều việc trễ hạn — hãy đặt hạn chót thực tế hơn hoặc ưu tiên việc sắp đến hạn');
       facts.push(['Tỉ lệ hoàn thành (%)', prd.cur.completion_rate == null ? '' : Math.round(prd.cur.completion_rate * 1000) / 10, prd.prev?.completion_rate == null ? '' : Math.round(prd.prev.completion_rate * 1000) / 10]);
@@ -648,11 +696,19 @@ export default async function reportsPage(root, { query }) {
         out.push(html` Về tài chính, bạn đã chi <strong>${money(f.total)}</strong>${trend(f.total, f.prev_total)}${top ? html`; khoản lớn nhất thuộc “${catName(top.name)}” (${pct(top.pct)})` : ''}.`);
         if (f.budget.overall) {
           const used = (f.total / f.budget.overall) * 100;
-          out.push(html` Mức chi bằng <strong>${pct(used)}</strong> ngân sách của kỳ${used > 100 ? ' — đã vượt ngân sách' : used > 90 ? ' — sát ngưỡng' : ', vẫn trong tầm kiểm soát'}.`);
-          if (used > 90) tips.push('chi tiêu đang chạm ngưỡng ngân sách — xem lại các khoản lớn trong mục Tài chính');
+          // A period still running is compared with the budget pace up to today,
+          // not the whole budget: one rent payment early in the month is "ahead
+          // of pace", not "over budget".
+          if (P.partial) {
+            out.push(html` Mức chi bằng <strong>${pct(used)}</strong> nhịp ngân sách tính đến hôm nay${used > 100 ? ' — đang chi nhanh hơn kế hoạch' : used > 90 ? ' — sát nhịp' : ', vẫn trong tầm kiểm soát'}.`);
+            if (used > 100) tips.push('chi tiêu đang nhanh hơn nhịp ngân sách — xem dự báo cuối tháng ở trang Chi tiêu');
+          } else {
+            out.push(html` Mức chi bằng <strong>${pct(used)}</strong> ngân sách của kỳ${used > 100 ? ' — đã vượt ngân sách' : used > 90 ? ' — sát ngưỡng' : ', vẫn trong tầm kiểm soát'}.`);
+            if (used > 90) tips.push('chi tiêu đang chạm ngưỡng ngân sách — xem lại các khoản lớn trong mục Tài chính');
+          }
         }
         const over = f.by_category.filter((c) => c.budget && c.total > c.budget);
-        if (over.length) out.push(html` Danh mục vượt ngân sách: ${over.map((c) => catName(c.name)).join(', ')}.`);
+        if (over.length) out.push(html` ${P.partial ? 'Danh mục chi nhanh hơn nhịp ngân sách' : 'Danh mục vượt ngân sách'}: ${over.map((c) => catName(c.name)).join(', ')}.`);
       } else {
         out.push(html` Không có khoản chi nào trong kỳ.`);
       }
@@ -755,6 +811,7 @@ export default async function reportsPage(root, { query }) {
       load();
     }
     if (a === 'now') { anchor = t0; persistQuery(); load(); }
+    if (a === 'last-month') { kind = 'month'; anchor = addMonths(startOfMonth(t0), -1); persistQuery(); load(); }
     if (a === 'print') printReport();
     if (a === 'csv-menu') {
       const all = ['summary', 'prod', 'time', 'fin', 'kpi', 'notes'].flatMap(csvOptions);
@@ -772,17 +829,67 @@ export default async function reportsPage(root, { query }) {
     }
   }));
 
-  function printReport() {
-    const docEl = document.documentElement;
-    docEl.dataset.print = 'report';
-    const done = () => { delete docEl.dataset.print; window.removeEventListener('afterprint', done); };
-    window.addEventListener('afterprint', done);
-    // Let layout settle with print rules before the dialog snapshots it.
-    requestAnimationFrame(() => window.print());
+  /** Re-create every chart from the cached data (charts read colours from CSS tokens). */
+  function repaintCharts() {
+    if (S.prod) renderProd();
+    if (S.fin) renderFin();
+    if (S.notes) renderNotes();
   }
 
+  // Paper is white: print with the light ("latte") tokens and re-render the
+  // charts with that palette, then restore the user's theme/skin afterwards.
+  // Works for the button and for Ctrl/⌘+P (beforeprint / afterprint).
+  let printSaved = null;
+  function enterPrint() {
+    if (printSaved) return;
+    const docEl = document.documentElement;
+    printSaved = { theme: docEl.dataset.theme, skin: docEl.dataset.skin };
+    docEl.dataset.print = 'report';
+    docEl.dataset.theme = 'light';
+    delete docEl.dataset.skin;
+    repaintCharts();
+  }
+  function exitPrint() {
+    if (!printSaved) return;
+    const docEl = document.documentElement;
+    delete docEl.dataset.print;
+    if (printSaved.theme) docEl.dataset.theme = printSaved.theme; else delete docEl.dataset.theme;
+    if (printSaved.skin) docEl.dataset.skin = printSaved.skin;
+    printSaved = null;
+    if (root.isConnected) repaintCharts();
+  }
+  window.addEventListener('beforeprint', enterPrint);
+  window.addEventListener('afterprint', exitPrint);
+  disposers.push(() => {
+    window.removeEventListener('beforeprint', enterPrint);
+    window.removeEventListener('afterprint', exitPrint);
+    exitPrint();
+  });
+  disposers.push(onThemeChange(() => { if (!printSaved) repaintCharts(); }));
+
+  function printReport() {
+    enterPrint();
+    // Let layout settle with print rules (and charts render) before the dialog snapshots it.
+    requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+  }
+
+  // ← / → step through periods (ignored while typing or when a dialog/menu is open).
+  const onKey = (e) => {
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    const t = e.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    if (document.querySelector('dialog[open], .menu')) return;
+    const btn = $(`[data-act="${e.key === 'ArrowLeft' ? 'prev' : 'next'}"]`);
+    if (!btn || btn.disabled) return;
+    e.preventDefault();
+    btn.click();
+  };
+  window.addEventListener('keydown', onKey);
+  disposers.push(() => window.removeEventListener('keydown', onKey));
+
   let reloadTimer = null;
-  disposers.push(onDataChanged(() => { clearTimeout(reloadTimer); reloadTimer = setTimeout(load, 400); }));
+  disposers.push(onDataChanged(() => { clearTimeout(reloadTimer); reloadTimer = setTimeout(() => load({ quiet: true }), 400); }));
 
   await load();
   return () => {
@@ -790,11 +897,10 @@ export default async function reportsPage(root, { query }) {
     loadToken++;
     disposers.forEach((d) => d());
     Object.keys(charts).forEach(killCharts);
-    delete document.documentElement.dataset.print;
   };
 }
 
-function secHead(n, title, sub, key, id) {
+function secHead(title, sub, key, id) {
   return html`
     <header class="rp-sec__head">
       <div class="rp-sec__titles"><h2 id="${id}">${title}</h2><p>${sub}</p></div>

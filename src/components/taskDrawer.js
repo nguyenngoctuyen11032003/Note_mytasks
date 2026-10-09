@@ -11,7 +11,7 @@ import { RECURRENCE_LABELS, ESTIMATE_PRESETS, openTaskForm } from './taskForm.js
 import { toast } from './toast.js';
 import * as timer from './timer.js';
 import * as store from '../core/store.js';
-import { updateTask, setTaskStatus, getTask } from '../services/tasks.js';
+import { updateTask, setTaskStatus, getTask, duplicateTask, listTaskNotes } from '../services/tasks.js';
 import { listEntriesForTask } from '../services/timeEntries.js';
 import { today, addDays, dayOf, startOfWeek } from '../utils/date.js';
 import { minutes, relDay, time as fmtTime, dateTime, ago, clock } from '../utils/format.js';
@@ -106,6 +106,7 @@ export function openTaskDrawer({ task, onSaved, onDeleted, onClose, focus } = {}
   let t = { ...task };
   let entries = null; // null = loading
   let entriesErr = null;
+  let notes = null; // linked notes; null = loading, [] = none / unavailable
   let editingDesc = false;
   let closed = false;
   const lastFocus = document.activeElement;
@@ -214,7 +215,7 @@ export function openTaskDrawer({ task, onSaved, onDeleted, onClose, focus } = {}
       </div>
       <div class="tk-prop">
         <dt>${icon('tag')}<span>Thẻ</span></dt>
-        <dd>${raw(String(tagInput('tags', t.tags || [])).replace('__ID__', 'tkd-tags'))}</dd>
+        <dd>${tagInput('tags', t.tags || [], 'tkd-tags')}</dd>
       </div>`);
     bindTagInput($('[data-sec="props"]'));
   }
@@ -291,11 +292,16 @@ export function openTaskDrawer({ task, onSaved, onDeleted, onClose, focus } = {}
   }
 
   function paintLinks() {
+    const list = notes && notes.length ? html`<ul class="tk-notes">${notes.map((n) => html`
+        <li><a class="tk-notes__item" href="#/notes?id=${encodeURIComponent(n.id)}">
+          ${icon('note')}<span class="tk-notes__title">${n.title || 'Ghi chú không tiêu đề'}</span><span class="tk-notes__when">${n.updated_at ? ago(n.updated_at) : ''}</span>
+        </a></li>`)}</ul>` : '';
     $('[data-sec="links"]').innerHTML = String(html`
-      <div class="tk-dsec__head"><h3>Liên quan</h3></div>
+      <div class="tk-dsec__head"><h3>Liên quan</h3>${notes && notes.length ? html`<span class="tk-check-sum">${notes.length} ghi chú</span>` : ''}</div>
+      ${notes == null ? html`<div class="skeleton sk-line" style="width:60%;margin-bottom:var(--s-3)"></div>` : list}
       <a class="tk-linkcard" href="#/notes?new=1&task=${encodeURIComponent(t.id)}">
         <span class="tk-linkcard__icon">${icon('note')}</span>
-        <span><strong>Ghi chú liên quan</strong><small>Mở một ghi chú mới để ghi lại ý tưởng, biên bản cho việc này.</small></span>
+        <span><strong>${notes && notes.length ? 'Thêm ghi chú' : 'Ghi chú liên quan'}</strong><small>Mở một ghi chú mới, tự liên kết với việc này.</small></span>
         ${icon('arrowRight')}
       </a>
       <button type="button" class="tk-linkcard" data-act="copy-link">
@@ -365,6 +371,11 @@ export function openTaskDrawer({ task, onSaved, onDeleted, onClose, focus } = {}
       entriesErr = err;
     }
     if (!closed) paintTime();
+  }
+
+  async function loadNotes() {
+    try { notes = await listTaskNotes(t.id, { limit: 6 }); } catch { notes = []; }
+    if (!closed) paintLinks();
   }
 
   async function refreshTask() {
@@ -447,6 +458,9 @@ export function openTaskDrawer({ task, onSaved, onDeleted, onClose, focus } = {}
   function moreMenu(anchor) {
     popMenu(anchor, [
       { label: 'Mở biểu mẫu đầy đủ', icon: 'edit', onClick: () => openTaskForm({ task: t, onSaved: (s) => { t = s; onSaved?.(s, { serverConfirmed: true }); if (!closed) paint(); }, onDeleted: () => { onDeleted?.(t, { alreadyDeleted: true }); close(); } }) },
+      { label: 'Nhân bản', icon: 'copy', onClick: async () => {
+        try { const c = await duplicateTask(t); onSaved?.(c, { serverConfirmed: true, duplicated: true }); toast('Đã nhân bản công việc.'); } catch (err) { toast.error(err); }
+      } },
       { label: 'Sao chép liên kết', icon: 'link', onClick: copyLink },
       'sep',
       { label: 'Xóa công việc', icon: 'trash', danger: true, onClick: () => { const victim = t; close(); onDeleted?.(victim); } },
@@ -459,7 +473,7 @@ export function openTaskDrawer({ task, onSaved, onDeleted, onClose, focus } = {}
       let v = e.target.value;
       if (f === 'estimated_minutes') {
         if (v === '') v = null;
-        else { v = Math.round(Number(v)); if (!Number.isFinite(v) || v < 0) { toast.error('Nhập số phút ≥ 0.'); paintProps(); return; } }
+        else { v = Math.round(Number(v)); if (!Number.isFinite(v) || v < 0 || v > 100000) { toast.error('Nhập số phút từ 0 đến 100.000.'); paintProps(); return; } }
       } else v = v || null;
       if (v !== (t[f] ?? null)) patch({ [f]: v });
       return;
@@ -607,6 +621,7 @@ export function openTaskDrawer({ task, onSaved, onDeleted, onClose, focus } = {}
 
   paint();
   loadEntries();
+  loadNotes();
   setTimeout(() => {
     if (focus === 'title') { const ta = root.querySelector('#tkd-title'); ta?.focus(); ta?.select(); }
     else panel.focus({ preventScroll: true });

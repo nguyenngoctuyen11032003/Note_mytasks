@@ -475,9 +475,6 @@ body::before {
   -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
   background: color-mix(in srgb, var(--paper) 94%, var(--surface)) !important;
 }
-.content { contain: layout style; }
-.sheet, .stat, .card-task, .kp-card { contain: paint; }
-.task-row, .entry-row, .expense-row { content-visibility: auto; contain-intrinsic-size: auto 64px; }
 
 @media (max-width: 960px), (pointer: coarse) {
   /* Phones: blur only on the chrome; everything else is a flat fill. */
@@ -529,4 +526,17 @@ body { background: transparent; }
 /* Keyboard-shortcut affordances are noise on touch devices. */
 @media (pointer: coarse) {
   .page-head [data-act='help'], .btn kbd, .topbar kbd { display: none !important; }
+}
+
+/* NOTE: no `contain: paint|layout` / `content-visibility` on cards, rows or
+   #content — they clip absolutely-positioned popovers (task pickers, menus,
+   comboboxes) and re-root position:fixed children (FABs, focus overlays). */
+
+/* Inline pickers/lists must float above sticky chrome (tab bar, FAB). */
+.tm-pick { position: relative; }
+.tm-pick__list { z-index: 60; max-height: min(320px, 46vh); overflow-y: auto; overscroll-behavior: contain; }
+/* Phones: while typing, the keyboard owns the bottom — hide the tab bar so it
+   never covers an open suggestion list or the focused field. */
+@media (max-width: 960px) {
+  .shell:has(input:focus, textarea:focus, select:focus, [contenteditable]:focus) .tabbar { transform: translateY(calc(100% + 12px)); }
 }

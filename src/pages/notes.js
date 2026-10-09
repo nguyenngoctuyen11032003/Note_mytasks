@@ -1,4 +1,4 @@
-// § 02 Ghi chú — three-pane notes workspace (library · list · editor).
+// Ghi chú — three-pane notes workspace (library · list · editor).
 // Desktop: 3 panes. ≤ 1100px: library becomes a drawer. ≤ 720px: one pane at a
 // time (list ↔ editor) with a back button and a thumb-reachable format bar.
 import { html, mount, on, raw, fragment } from '../utils/dom.js';
@@ -20,13 +20,13 @@ import * as E from '../components/noteEditor.js';
 const VIEWS = [
   { id: 'all', label: 'Tất cả ghi chú', icon: 'note' },
   { id: 'pinned', label: 'Đã ghim', icon: 'pin' },
-  { id: 'checklist', label: 'Checklist', icon: 'tasks' },
+  { id: 'checklist', label: 'Danh sách kiểm', icon: 'tasks' },
   { id: 'journal', label: 'Nhật ký', icon: 'calendar' },
   { id: 'meeting', label: 'Họp', icon: 'user' },
   { id: 'archived', label: 'Lưu trữ', icon: 'archive' },
   { id: 'trash', label: 'Thùng rác', icon: 'trash' },
 ];
-const KIND_LABEL = { note: 'Ghi chú', checklist: 'Checklist', journal: 'Nhật ký', meeting: 'Họp' };
+const KIND_LABEL = { note: 'Ghi chú', checklist: 'Danh sách kiểm', journal: 'Nhật ký', meeting: 'Họp' };
 const SORTS = [
   { id: 'updated', label: 'Sửa gần nhất' },
   { id: 'created', label: 'Ngày tạo' },
@@ -72,9 +72,7 @@ export default async function notesPage(root, { query }) {
   mount(root, html`
     <div class="nb-page">
       ${pageHead({
-        num: '02',
-        kicker: 'Ghi chú',
-        title: 'Sổ tay <em>ghi chép</em>',
+        title: 'Ghi chú',
         actions: html`
           <button class="btn btn--ghost" data-act="new-blank" title="Mở ngay một trang trắng">${icon('edit')} Viết nhanh</button>
           <button class="btn btn--primary" data-act="templates" title="Chọn mẫu cho ghi chú mới (N)">${icon('plus')} Ghi chú mới <kbd class="nb-kbd">N</kbd></button>`,
@@ -102,6 +100,9 @@ export default async function notesPage(root, { query }) {
      Layout helpers
      ================================================================ */
   function fit() {
+    // Sticky offsets follow the real top bar (it is shorter on phones than --topbar-h).
+    const bar = document.querySelector('.topbar');
+    if (bar) root.style.setProperty('--nb-top', Math.round(bar.getBoundingClientRect().height) + 'px');
     if (isPhone()) { ws.style.removeProperty('--nb-h'); return; }
     const top = ws.getBoundingClientRect().top + window.scrollY;
     ws.style.setProperty('--nb-h', Math.max(520, Math.floor(window.innerHeight - top - 20)) + 'px');
@@ -114,6 +115,9 @@ export default async function notesPage(root, { query }) {
   function showPane(p) {
     ws.dataset.pane = p;
     if (isPhone()) window.scrollTo({ top: 0 });
+    // The editor may have been rendered while its pane was hidden (phones):
+    // size the textareas again now that they have a layout.
+    if (p === 'editor') { autosize($('.nb-title')); autosize($('.nb-text')); }
     if (p === 'editor' && isPhone() && !navPushed) {
       history.pushState({ nbEditor: true }, '', location.href);
       navPushed = true;
@@ -138,6 +142,8 @@ export default async function notesPage(root, { query }) {
 
   function autosize(el) {
     if (!el) return;
+    // Hidden (display:none pane) → scrollHeight is 0; keep the natural height.
+    if (!el.getClientRects().length) { el.style.removeProperty('height'); return; }
     const sc = el.closest('[data-scroll]');
     const top = sc ? sc.scrollTop : window.scrollY;
     el.style.height = 'auto';
@@ -419,6 +425,8 @@ export default async function notesPage(root, { query }) {
     await saving;
   }
 
+  const isBlank = (n) => !String(n.title || '').trim() && !E.plainText(n.content).replace(/[☐•\s]/g, '') && !(n.tags || []).length && !n.task_id;
+
   /** Flush, then release the current note (discarding a brand-new blank one). */
   async function leaveCurrent() {
     if (!cur) return true;
@@ -433,8 +441,7 @@ export default async function notesPage(root, { query }) {
       pending = {};
     }
     const old = cur;
-    const blank = !old.title.trim() && !E.plainText(old.content).replace(/[☐•\s]/g, '') && !(old.tags || []).length && !old.task_id;
-    if (freshId === old.id && blank) {
+    if (freshId === old.id && isBlank(old)) {
       freshId = null;
       notes = notes.filter((x) => x.id !== old.id);
       $(`[data-items] [data-id="${old.id}"]`)?.remove();
@@ -533,7 +540,7 @@ export default async function notesPage(root, { query }) {
           <div class="nb-meta" data-meta>
             ${ro
               ? (n.tags || []).map((t) => html`<span class="tag">${t}</span>`)
-              : raw(String(tagInput('tags', n.tags || [])).replace('__ID__', 'nb-tag-input'))}
+              : tagInput('tags', n.tags || [], 'nb-tag-input')}
             <span class="nb-taskslot" data-taskslot></span>
           </div>
           <div class="nb-body" data-body data-mode="${m}">
@@ -646,8 +653,8 @@ export default async function notesPage(root, { query }) {
     pending = {};
     setQuery({ id: n.id });
     markActive();
+    showPane('editor'); // first, so the textareas have a layout to size / focus
     renderEditor({ focus });
-    showPane('editor');
   }
 
   async function closeEditor() {
@@ -717,8 +724,8 @@ export default async function notesPage(root, { query }) {
     pending = {};
     setQuery({ id: n.id });
     markActive();
-    renderEditor({ focus: !n.title || /[:—]\s*$/.test(n.title) ? 'title' : 'body' });
     showPane('editor');
+    renderEditor({ focus: !n.title || /[:—]\s*$/.test(n.title) ? 'title' : 'body' });
     loadOverview();
   }
 
@@ -1371,6 +1378,12 @@ export default async function notesPage(root, { query }) {
     tagObs?.disconnect();
     E.closePopover();
     closeMenu();
-    if (Object.keys(pending).length) flush();
+    // Leaving the page right after "Viết nhanh" must not leave an empty note behind.
+    if (cur && freshId === cur.id && isBlank(cur)) {
+      clearTimeout(saveTimer);
+      pending = {};
+      const id = cur.id;
+      Promise.resolve(saving).then(() => N.deleteNote(id)).catch(() => {});
+    } else if (Object.keys(pending).length) flush();
   };
 }

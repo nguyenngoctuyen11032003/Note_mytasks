@@ -16,8 +16,8 @@ import { navigate } from '../core/router.js';
 import { onDataChanged, notifyDataChanged } from '../core/events.js';
 import { listTasks, setTaskStatus, focusTasks, listCompletedBetween } from '../services/tasks.js';
 import { listEntries, entrySeconds } from '../services/timeEntries.js';
-import { listExpenses, anomalies as expenseAnomalies } from '../services/expenses.js';
-import { budgetStatus } from '../services/budgets.js';
+import { listExpenses, listRecent, anomalies as expenseAnomalies } from '../services/expenses.js';
+import { budgetStatus, budgetState, oneOffThreshold, projectMonth, routineRate } from '../services/budgets.js';
 import { kpiForecast } from '../services/kpis.js';
 import { recentActivity } from '../services/activity.js';
 import { summary as dashSummary, streaks as streakRpc, dailyAllowance, burnDown, streakFrom } from '../services/dashboard.js';
@@ -55,6 +55,17 @@ const ACT_VERB = {
   'expense:created': 'Ghi khoản chi', 'shopping_item:created': 'Thêm vào danh sách mua',
   'shopping_item:completed': 'Đã mua', 'kpi:updated': 'Cập nhật KPI', 'note:created': 'Tạo ghi chú',
 };
+
+/** Deep link for an activity row (entity may have been deleted since). */
+function actHref(a) {
+  const id = encodeURIComponent(a.entity_id || '');
+  if (a.entity_type === 'task') return id ? `#/tasks?id=${id}` : '#/tasks';
+  if (a.entity_type === 'expense') return id ? `#/expenses?focus=${id}` : '#/expenses';
+  if (a.entity_type === 'shopping_item') return '#/shopping';
+  if (a.entity_type === 'kpi') return id ? `#/kpi?kpi=${id}` : '#/kpi';
+  if (a.entity_type === 'note') return id ? `#/notes?id=${id}` : '#/notes';
+  return null;
+}
 
 /** Non-critical call: logs and resolves `fallback` instead of rejecting. */
 const soft = (fn, fallback = null) =>
@@ -129,11 +140,8 @@ export default async function dashboard(root) {
   mount(root, html`
     <header class="page-head dash-head">
       <div>
-        <div class="page-head__eyebrow">
-          <span class="eyebrow">Tổng quan</span>
-          <span class="eyebrow dash-head__stamp">${day(t0, 'long')} · Tuần ${isoWeek(t0)}</span>
-        </div>
-        <h1>${greeting()}, <em>${store.displayName()}</em>.</h1>
+        <h1>${greeting()}, ${store.displayName()}.</h1>
+        <p class="dash-head__date">${day(t0, 'long')} · Tuần ${isoWeek(t0)}</p>
         <p class="dash-head__line" data-headline aria-live="polite"><span class="skeleton sk-line" style="width:min(520px,90%);height:16px"></span></p>
       </div>
       <div class="page-head__actions dash-head__actions">
@@ -147,14 +155,14 @@ export default async function dashboard(root) {
       <section class="dash__tiles dash-tiles" data-tiles aria-label="Chỉ số chính">
         ${[0, 1, 2, 3].map(() => html`<div class="stat dash-tile"><div class="skeleton sk-line" style="width:45%"></div><div class="skeleton" style="height:36px;width:55%"></div><div class="skeleton sk-line" style="width:70%"></div></div>`)}
       </section>
-      <article class="sheet sheet--ticked dash__focus" data-focus>${sheetHead('A.1', 'Tiêu điểm hôm nay')}${loadingRows(5)}</article>
-      <article class="sheet dash__timer" data-timer>${sheetHead('A.2', 'Đồng hồ')}<div class="sheet__body">${loadingBlock(64)}</div></article>
-      <article class="sheet dash__insights" data-insights>${sheetHead('A.3', 'Gợi ý thông minh')}${loadingRows(3)}</article>
-      <article class="sheet dash__trend" data-trend>${sheetHead('B.1', 'Nhịp 14 ngày')}<div class="sheet__body">${loadingBlock(260)}</div></article>
-      <article class="sheet dash__spend" data-spend>${sheetHead('B.2', 'Chi tiêu theo danh mục')}<div class="sheet__body">${loadingBlock(260)}</div></article>
-      <article class="sheet dash__burn" data-burn>${sheetHead('B.3', 'Ngân sách tháng')}<div class="sheet__body">${loadingBlock(220)}</div></article>
-      <article class="sheet dash__activity" data-activity>${sheetHead('C.2', 'Hoạt động gần đây')}${loadingRows(4)}</article>
-      <article class="sheet dash__notes" data-notes>${sheetHead('C.1', 'Ghi chú gần đây')}<div class="sheet__body">${loadingBlock(120)}</div></article>
+      <article class="sheet sheet--ticked dash__focus" data-focus>${sheetHead('', 'Tiêu điểm hôm nay')}${loadingRows(5)}</article>
+      <article class="sheet dash__timer" data-timer>${sheetHead('', 'Đồng hồ')}<div class="sheet__body">${loadingBlock(64)}</div></article>
+      <article class="sheet dash__insights" data-insights>${sheetHead('', 'Gợi ý thông minh')}${loadingRows(3)}</article>
+      <article class="sheet dash__trend" data-trend>${sheetHead('', 'Nhịp 14 ngày')}<div class="sheet__body">${loadingBlock(260)}</div></article>
+      <article class="sheet dash__spend" data-spend>${sheetHead('', 'Chi tiêu theo danh mục')}<div class="sheet__body">${loadingBlock(260)}</div></article>
+      <article class="sheet dash__burn" data-burn>${sheetHead('', 'Ngân sách tháng')}<div class="sheet__body">${loadingBlock(220)}</div></article>
+      <article class="sheet dash__activity" data-activity>${sheetHead('', 'Hoạt động gần đây')}${loadingRows(4)}</article>
+      <article class="sheet dash__notes" data-notes>${sheetHead('', 'Ghi chú gần đây')}<div class="sheet__body">${loadingBlock(120)}</div></article>
     </div>`);
 
   const $ = (s) => root.querySelector(s);
@@ -238,7 +246,7 @@ export default async function dashboard(root) {
 
     loadNotes(my);
     try {
-      const [open, completed, entries, expenses, sum, focus, budgets, kpis, anomalies, streak, activity] = await Promise.all([
+      const [open, completed, entries, expenses, sum, focus, budgets, kpis, anomalies, streak, activity, history] = await Promise.all([
         listTasks({ status: OPEN, limit: 1000 }),
         listCompletedBetween(fromIso, toIso),
         listEntries(fromIso, toIso),
@@ -249,16 +257,30 @@ export default async function dashboard(root) {
         soft(() => kpiForecast()),
         soft(() => expenseAnomalies(30)),
         soft(() => streakRpc()),
-        soft(() => recentActivity(7), []),
+        soft(() => recentActivity(10), []),
+        soft(() => listRecent({ days: 180, limit: 600 })),
       ]);
       if (my !== token) return;
-      S = derive({ t, weekStart, prevWeekStart, from, from14, mStart, mEnd, open, completed, entries, expenses, sum, focus, budgets, kpis, anomalies, streak, activity });
+      S = derive({ t, weekStart, prevWeekStart, from, from14, mStart, mEnd, open, completed, entries, expenses, sum, focus, budgets, kpis, anomalies, streak, activity, history });
       renderAll();
     } catch (err) {
       if (my !== token) return;
       if (err?.sessionExpired) throw err;
+      console.error('[dashboard]', err);
+      S = null;
+      charts.forEach((d) => d());
+      charts.clear();
       mount($('[data-headline]'), html`<span class="muted">Không tải được dữ liệu hôm nay.</span>`);
-      mount($('[data-focus]'), html`${sheetHead('A.1', 'Tiêu điểm hôm nay')}<div class="sheet__body">${errorState(err)}</div>`);
+      mount($('[data-tiles]'), '');
+      mount($('[data-focus]'), html`${sheetHead('', 'Tiêu điểm hôm nay')}<div class="sheet__body">${errorState(err)}</div>`);
+      const failed = (sel, title) => mount($(sel), html`${sheetHead('', title)}<div class="sheet__body"><p class="muted dash-quiet">Chưa tải được dữ liệu. <button class="btn btn--ghost btn--sm" data-act="retry">${icon('refresh')} Thử lại</button></p></div>`);
+      failed('[data-insights]', 'Gợi ý thông minh');
+      failed('[data-trend]', 'Nhịp 14 ngày');
+      failed('[data-spend]', 'Chi tiêu theo danh mục');
+      failed('[data-burn]', 'Ngân sách tháng');
+      failed('[data-activity]', 'Hoạt động gần đây');
+      // The clock works without the rest of the data: keep it usable.
+      renderTimer();
     }
   }
 
@@ -282,9 +304,35 @@ export default async function dashboard(root) {
 
     const monthSpent = r.expenses.reduce((s, x) => s + Number(x.amount), 0);
     const todaySpent = spendBy[t] || 0;
+    // Month-end forecast: same model as the Expenses page (routine daily rate x
+    // days left, one-offs such as rent counted once) instead of the RPC's plain
+    // linear projection, so both pages show the same number.
+    const hist = Array.isArray(r.history) ? r.history : [];
+    const threshold = oneOffThreshold(hist);
+    const forecast = (catId) => {
+      const mine = (x) => catId === undefined || (x.category_id || null) === catId;
+      const baseRate = routineRate(hist.filter(mine), { month: mStart, threshold });
+      return projectMonth(r.expenses.filter(mine), { month: mStart, today: t, threshold, baseRate: baseRate ?? null });
+    };
+    if (Array.isArray(r.budgets)) {
+      r.budgets = r.budgets.map((x) => {
+        if (x.budget == null) return x;
+        const projected = forecast(x.category_id ? x.category_id : undefined);
+        return { ...x, projected, status: budgetState(x.budget, x.spent, projected) };
+      });
+    }
     const totalRow = (r.budgets || []).find((b) => b.category_id == null && b.budget != null);
     const budget = totalRow ? totalRow.budget : r.sum?.money?.month_budget ?? null;
-    const burn = burnDown({ byDay: spendBy, month: mStart, budget, today: t });
+    let burn = burnDown({ byDay: spendBy, month: mStart, budget, today: t });
+    if (burn.elapsed > 0 && burn.elapsed < burn.total) {
+      const fc = Math.round(forecast());
+      const span = burn.total - burn.elapsed;
+      burn = {
+        ...burn,
+        projectedTotal: fc,
+        projected: burn.days.map((_, i) => (i + 1 < burn.elapsed ? null : Math.round(burn.spent + ((fc - burn.spent) * (i + 1 - burn.elapsed)) / span))),
+      };
+    }
     const allowance = dailyAllowance({ budget, monthSpent, todaySpent, today: t, monthEnd: mEnd });
 
     // Streak: server RPC when available, else from the loaded window.
@@ -325,12 +373,12 @@ export default async function dashboard(root) {
 
   async function loadNotes(my) {
     const box = $('[data-notes]');
-    const head = sheetHead('C.1', 'Ghi chú gần đây', html`<a class="btn btn--ghost btn--sm" href="#/notes">Tất cả ${icon('arrowRight')}</a>`);
+    const head = sheetHead('', 'Ghi chú gần đây', html`<a class="btn btn--ghost btn--sm" href="#/notes">Tất cả ${icon('arrowRight')}</a>`);
     let rows = null;
     try {
       const mod = await import('../services/notes.js');
       // Service orders pinned first; "recent" means last edited.
-      rows = ((await mod.listNotes({ limit: 8 })) || [])
+      rows = ((await mod.listNotes({ limit: 40 })) || [])
         .slice()
         .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))
         .slice(0, 4);
@@ -453,7 +501,7 @@ export default async function dashboard(root) {
     const { focus, overdue, openById } = S;
     const run = store.get().runningEntry;
     const box = $('[data-focus]');
-    const head = sheetHead('A.1', 'Tiêu điểm hôm nay', html`<a class="btn btn--ghost btn--sm" href="#/tasks">Tất cả (${num(openById.size)}) ${icon('arrowRight')}</a>`);
+    const head = sheetHead('', 'Tiêu điểm hôm nay', html`<a class="btn btn--ghost btn--sm" href="#/tasks">Tất cả (${num(openById.size)}) ${icon('arrowRight')}</a>`);
     const warn = overdue.length
       ? html`<div class="dash-overdue" role="status">${icon('alert')}<span><b>${num(overdue.length)} việc quá hạn</b> — xử lý hoặc dời hạn để danh sách phản ánh đúng thực tế.</span><a href="#/tasks?scope=overdue">Xem</a></div>`
       : '';
@@ -463,14 +511,14 @@ export default async function dashboard(root) {
     }
     mount(box, html`${head}${warn}
       <ol class="list focus-list">
-        ${focus.map((f, i) => {
+        ${focus.map((f) => {
           const full = openById.get(f.task_id);
           const running = run && run.task_id === f.task_id;
           return html`
             <li class="focus-row ${running ? 'is-running' : ''}">
               <button class="tick" role="checkbox" aria-checked="false" data-act="done" data-id="${f.task_id}" data-p="${f.priority}" aria-label="Hoàn thành ${f.title}">${icon('check')}</button>
               <div class="focus-row__main" data-act="open-task" data-id="${f.task_id}" role="button" tabindex="0">
-                <div class="focus-row__title"><span class="focus-row__idx">${String(i + 1).padStart(2, '0')}</span>${f.title}</div>
+                <div class="focus-row__title">${f.title}</div>
                 <div class="focus-row__meta">
                   ${dueLabel(f.due_date, f.status)}${prio(f.priority)}
                   ${(f.reasons || []).filter((x) => REASON[x] && !['overdue', 'due_today', 'priority_urgent', 'priority_high'].includes(x)).slice(0, 2).map((x) => html`<span class="focus-chip focus-chip--${REASON[x][1]}">${REASON[x][0]}</span>`)}
@@ -497,7 +545,7 @@ export default async function dashboard(root) {
     const paused = !run && timer.pausedSession();
     const label = run ? run.task?.title || run.description || 'Không gắn công việc' : paused ? paused.title || 'Phiên tạm dừng' : 'Chưa có phiên nào đang chạy';
     mount(box, html`
-      ${sheetHead('A.2', 'Đồng hồ', run ? html`<span class="badge badge--accent">Đang chạy</span>` : paused ? html`<span class="badge badge--warning">Tạm dừng</span>` : html`<a class="btn btn--ghost btn--sm" href="#/time">Nhật ký ${icon('arrowRight')}</a>`)}
+      ${sheetHead('', 'Đồng hồ', run ? html`<span class="badge badge--accent">Đang chạy</span>` : paused ? html`<span class="badge badge--warning">Tạm dừng</span>` : html`<a class="btn btn--ghost btn--sm" href="#/time">Nhật ký ${icon('arrowRight')}</a>`)}
       <div class="sheet__body dash-clock ${run ? 'is-running' : ''}">
         <div class="dash-clock__read">
           <div class="dash-clock__time num" data-clock>${clock(timer.sessionSeconds())}</div>
@@ -523,7 +571,7 @@ export default async function dashboard(root) {
   function renderInsights() {
     const { insights } = S;
     const box = $('[data-insights]');
-    const head = sheetHead('A.3', 'Gợi ý thông minh');
+    const head = sheetHead('', 'Gợi ý thông minh');
     if (!insights.length) {
       mount(box, html`${head}<div class="insight insight--success insight--calm">
         <span class="insight__icon">${icon('checkCircle')}</span>
@@ -551,7 +599,7 @@ export default async function dashboard(root) {
     const totalDone = sumOver(days14, doneBy);
     const activeDays = days14.filter((d) => (minBy[d] || 0) > 0).length;
     mount($('[data-trend]'), html`
-      ${sheetHead('B.1', 'Nhịp 14 ngày', html`<div class="chart-key"><span><i style="background:var(--ink-2)"></i>Giờ làm</span><span><i style="background:var(--accent);border-radius:50%"></i>Việc xong</span></div>`)}
+      ${sheetHead('', 'Nhịp 14 ngày', html`<div class="chart-key"><span><i style="background:var(--ink-2)"></i>Giờ làm</span><span><i style="background:var(--accent);border-radius:50%"></i>Việc xong</span></div>`)}
       <div class="sheet__body">
         <dl class="dash-figures">
           <div><dt>Tổng giờ</dt><dd>${minutes(totalMin)}</dd></div>
@@ -567,13 +615,13 @@ export default async function dashboard(root) {
         labels: days14.map((d) => `${d.slice(8)}/${d.slice(5, 7)}`),
         datasets: [
           { type: 'bar', label: 'Giờ làm', data: days14.map((d) => Math.round(((minBy[d] || 0) / 60) * 10) / 10), backgroundColor: days14.map((d) => (d === t ? p.accent : p.ink2)), borderRadius: 2, maxBarThickness: 18, yAxisID: 'y', order: 2 },
-          { type: 'line', label: 'Việc xong', data: days14.map((d) => doneBy[d] || 0), borderColor: p.accent, backgroundColor: p.surface, pointBackgroundColor: p.surface, pointBorderColor: p.accent, pointRadius: 3, pointHoverRadius: 5, pointBorderWidth: 1.5, borderWidth: 1.5, tension: 0.3, yAxisID: 'y1', order: 1 },
+          { type: 'line', label: 'Việc xong', data: days14.map((d) => doneBy[d] || 0), borderColor: p.accent, backgroundColor: p.surface, pointBackgroundColor: p.surface, pointBorderColor: p.accent, pointRadius: 3, pointHoverRadius: 5, pointBorderWidth: 1.5, borderWidth: 1.5, cubicInterpolationMode: 'monotone', yAxisID: 'y1', order: 1 },
         ],
       },
       options: {
         scales: {
-          y: { ticks: { callback: (v) => v + 'g' } },
-          y1: { position: 'right', beginAtZero: true, grid: { display: false }, border: { display: false }, ticks: { precision: 0, maxTicksLimit: 4 } },
+          y: { beginAtZero: true, ticks: { callback: (v) => v + 'g' } },
+          y1: { position: 'right', beginAtZero: true, suggestedMax: Math.max(3, ...days14.map((d) => doneBy[d] || 0)) + 1, grid: { display: false }, border: { display: false }, ticks: { precision: 0, maxTicksLimit: 4 } },
         },
         plugins: { tooltip: { callbacks: { label: (c) => (c.datasetIndex === 0 ? ` ${minutes(c.raw * 60)} làm việc` : ` ${c.raw} việc xong`) } } },
       },
@@ -592,9 +640,10 @@ export default async function dashboard(root) {
     const p = palette();
     const rows = [...byCat.entries()].map(([id, o]) => {
       const c = store.categoryById(id) || o.cat;
-      return { id, name: c?.name || 'Chưa phân loại', color: c?.color || p.ink4, v: o.v };
+      const hex = safeColor(c?.color);
+      return { id, name: c?.name || 'Chưa phân loại', color: hex && hex.startsWith('#') ? hex : p.ink4, v: o.v };
     }).sort((a, b) => b.v - a.v);
-    const head = sheetHead('B.2', 'Chi tiêu theo danh mục', html`<a class="btn btn--ghost btn--sm" href="#/expenses">Chi tiết ${icon('arrowRight')}</a>`);
+    const head = sheetHead('', 'Chi tiêu theo danh mục', html`<a class="btn btn--ghost btn--sm" href="#/expenses">Chi tiết ${icon('arrowRight')}</a>`);
     if (!rows.length) {
       charts.get('spend')?.(); charts.delete('spend');
       mount($('[data-spend]'), html`${head}${emptyState({ art: 'wallet', small: true, title: 'Chưa có khoản chi', text: 'Ghi lại khoản chi đầu tiên để thấy phân bổ theo danh mục.', action: html`<button class="btn btn--sm" data-act="new-expense">${icon('plus')} Ghi khoản chi</button>` })}`);
@@ -624,7 +673,7 @@ export default async function dashboard(root) {
     const { burn, budget, monthSpent, t, mEnd } = S;
     const daysLeft = diffDays(mEnd, t) + 1;
     const over = budget > 0 && burn.projectedTotal > budget;
-    const head = sheetHead('B.3', 'Ngân sách tháng', html`<div class="chart-key">
+    const head = sheetHead('', 'Ngân sách tháng', html`<div class="chart-key">
       <span><i style="background:var(--accent)"></i>Thực tế</span>
       ${budget > 0 ? html`<span><i class="dash-key-dash"></i>Lý tưởng</span>` : ''}
       <span><i class="dash-key-dash dash-key-dash--accent"></i>Dự báo</span></div>`);
@@ -661,25 +710,28 @@ export default async function dashboard(root) {
   function renderActivity() {
     const { activity } = S;
     const box = $('[data-activity]');
-    const head = sheetHead('C.2', 'Hoạt động gần đây');
+    const head = sheetHead('', 'Hoạt động gần đây');
     if (!activity?.length) {
       mount(box, html`${head}${emptyState({ art: 'activity', small: true, title: 'Chưa có hoạt động', text: 'Mọi thay đổi quan trọng sẽ được ghi lại ở đây.' })}`);
       return;
     }
     mount(box, html`${head}
       <ol class="timeline">
-        ${activity.map((a) => html`
-          <li class="timeline__item">
+        ${activity.map((a) => {
+          const href = actHref(a);
+          const title = a.title && a.title !== 'Expense' ? a.title : a.entity_type === 'expense' ? 'Khoản chi' : 'Không tên';
+          const body = html`
             <span class="timeline__icon">${icon(ACT_ICON[a.entity_type] || 'activity')}</span>
             <div class="grow">
-              <div class="timeline__text"><span class="muted">${ACT_VERB[`${a.entity_type}:${a.action}`] || a.action}</span> <strong>${a.title}</strong>
-                ${a.metadata?.amount ? html` · <span class="num">${money(a.metadata.amount)}</span>` : ''}
-                ${a.metadata?.total ? html` · <span class="num">${money(a.metadata.total)}</span>` : ''}
-                ${a.metadata?.value != null ? html` → <span class="num">${dec(a.metadata.value)}</span>` : ''}
+              <div class="timeline__text"><span class="muted">${ACT_VERB[`${a.entity_type}:${a.action}`] || 'Cập nhật'}</span> <strong>${title}</strong>
+                ${Number(a.metadata?.amount) > 0 ? html` · <span class="num">${money(a.metadata.amount)}</span>` : ''}
+                ${Number(a.metadata?.total) > 0 ? html` · <span class="num">${money(a.metadata.total)}</span>` : ''}
+                ${a.metadata?.value != null ? html` → <span class="num">${dec(Number(a.metadata.value))}</span>` : ''}
               </div>
-              <div class="timeline__time">${ago(a.created_at)}</div>
-            </div>
-          </li>`)}
+              <div class="timeline__time" title="${a.created_at ? new Date(a.created_at).toLocaleString('vi-VN') : ''}">${ago(a.created_at)}</div>
+            </div>`;
+          return html`<li class="timeline__item">${href ? html`<a class="dash-act" href="${href}">${body}</a>` : body}</li>`;
+        })}
       </ol>`);
   }
 

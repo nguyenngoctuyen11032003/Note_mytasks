@@ -2,7 +2,8 @@
 import { appBaseUrl } from '../core/config.js';
 import { db, run, invalid, AppError, toAppError } from './errors.js';
 
-const MIN_PASSWORD = 6;
+// Same rule as the sign-up / reset / settings forms (8 characters).
+const MIN_PASSWORD = 8;
 
 function vEmail(email) {
   const e = typeof email === 'string' ? email.trim() : '';

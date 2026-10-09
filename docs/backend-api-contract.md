@@ -24,6 +24,8 @@ Mọi thay đổi phải cập nhật file này.
 | `20261009000300_tasks_time.sql` | Timer, recurring tasks, focus score, ước lượng thời gian |
 | `20261009000400_finance.sql` | Budget status/forecast, anomaly, category suggestion, shopping→expense |
 | `20261009000500_kpi_dashboard.sql` | KPI forecast, dashboard summary, productivity stats, streak |
+| `20261009001000_integrity_hardening.sql` | Mua lại không tạo expense thứ 2; task lặp chỉ 1 occurrence mở; trigger luật `time_entries` (không chồng giờ, không ở tương lai, manual ≤ 24h, không mở lại) + RPC `update_time_entry(p_id, p_task_id, p_started_at, p_ended_at, p_description)`; CHECK ngày 1900–2999; tag 1–100 ký tự |
+| `20261009001100_notes_accent_search.sql` | Tìm ghi chú không phân biệt dấu: `notes.search` chứa cả từ gốc và từ bỏ dấu; client truy vấn `(gốc:* | bỏ_dấu:*)` |
 
 ## 1. Tasks & Time (`000300`)
 
@@ -37,7 +39,7 @@ Mọi thay đổi phải cập nhật file này.
 |---|---|---|
 | `start_timer(p_task_id uuid default null, p_description text default null)` (định nghĩa ở 000200, 000300 có thể nâng cấp cùng chữ ký) | row `time_entries` | Nếu đang có timer chạy → tự dừng (ended_at=now()) rồi mở segment mới. Task đang `todo` → chuyển `in_progress`. Task không tồn tại/không thuộc user → `not_found`. Task `completed`/`cancelled` → `task_closed`. |
 | `stop_timer()` | row `time_entries` đã đóng hoặc `null` nếu không có timer | Segment < 1 giây → xóa thay vì lưu (tránh CHECK ended_at > started_at). |
-| `timer_current()` | jsonb `{entry, task_title, elapsed_seconds, task_total_seconds}` hoặc `null` | |
+| `timer_current()` | jsonb `{entry, task_title, elapsed_seconds, task_total_seconds}` hoặc `null` | Timer không gắn task: `task_total_seconds` = `elapsed_seconds` (001000). |
 | `log_time(p_task_id uuid, p_started_at timestamptz, p_ended_at timestamptz, p_description text default null)` | row `time_entries` (source=`manual`) | Từ chối khi chồng lấn segment khác của user → `time_overlap`; tương lai → `invalid_input`; > 24h → `invalid_input`. |
 | `focus_tasks(p_limit int default 5)` | `table(task_id uuid, title text, priority text, due_date date, status text, score numeric, reasons text[])` | Chấm điểm task mở (`todo`,`in_progress`). Công thức bên dưới. Sắp xếp score desc, due_date asc nulls last. |
 | `estimate_suggestion(p_category_id uuid default null)` | jsonb `{samples, accuracy_ratio, median_actual_minutes, suggested_multiplier}` | Từ task đã hoàn thành có cả estimated>0 và actual>0 (tối đa 50 gần nhất, lọc category nếu có). `accuracy_ratio` = median(actual/estimated). `suggested_multiplier` = accuracy_ratio làm tròn 2 số, null nếu samples < 3. |

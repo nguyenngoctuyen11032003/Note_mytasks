@@ -5,13 +5,30 @@ let TZ = 'Asia/Ho_Chi_Minh';
 let WEEK_START = 1; // 0 = Sun, 1 = Mon
 
 export function configureDates({ timezone, weekStartsOn } = {}) {
-  if (timezone) TZ = timezone;
-  if (weekStartsOn != null) WEEK_START = Number(weekStartsOn);
+  if (timezone && timezone !== TZ) {
+    try {
+      new Intl.DateTimeFormat('en-CA', { timeZone: timezone }); // RangeError on an unknown IANA name
+      TZ = timezone;
+    } catch { /* keep the previous zone rather than break every date on the page */ }
+  }
+  if (weekStartsOn != null) {
+    const w = Number(weekStartsOn);
+    if (Number.isInteger(w) && w >= 0 && w <= 6) WEEK_START = w;
+  }
 }
 export const getTimezone = () => TZ;
 export const getWeekStart = () => WEEK_START;
 
-const dayFmt = () => new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' });
+// Formatters are cached per timezone (building one costs far more than using it).
+const fmts = new Map();
+function tzFmt(kind, opts) {
+  const key = `${kind}|${TZ}`;
+  let f = fmts.get(key);
+  if (!f) { f = new Intl.DateTimeFormat(kind === 'day' ? 'en-CA' : 'en-US', { timeZone: TZ, ...opts }); fmts.set(key, f); }
+  return f;
+}
+const dayFmt = () => tzFmt('day', { year: 'numeric', month: '2-digit', day: '2-digit' });
+const partsFmt = () => tzFmt('parts', { hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 
 /** Instant (Date | string) → 'YYYY-MM-DD' in the user's timezone. */
 export function dayOf(instant) {
@@ -61,16 +78,34 @@ export function daysBetween(from, to) {
 }
 export const monthKey = (day) => day.slice(0, 7);
 
+/** Offset of the user's zone at instant `ms` (local wall clock − UTC), in ms. */
+function offsetAt(ms) {
+  const parts = partsFmt().formatToParts(new Date(ms));
+  const get = (k) => Number(parts.find((p) => p.type === k).value);
+  return Date.UTC(get('year'), get('month') - 1, get('day'), get('hour') % 24, get('minute')) - ms;
+}
+
+/**
+ * Wall-clock time (expressed as a UTC ms value, e.g. Date.UTC(y, m, d, h, mi))
+ * → the real instant in the user's timezone. The offset is taken at the
+ * candidate instant itself (not at the wall time read as UTC), so DST changes
+ * between the two are handled:
+ * - ambiguous wall time (clocks go back) → the earlier instant;
+ * - skipped wall time (clocks go forward) → the same distance past the jump
+ *   (e.g. 00:00 skipped → 01:00).
+ */
+function wallToInstant(wall) {
+  // At most one transition within ±1 day: the offsets on either side are the only candidates.
+  const before = offsetAt(wall - 86400000);
+  const after = offsetAt(wall + 86400000);
+  const hits = [];
+  for (const off of new Set([before, after])) if (offsetAt(wall - off) === off) hits.push(wall - off);
+  return hits.length ? Math.min(...hits) : wall - before;
+}
+
 /** UTC instant of 00:00 on `day` in the user's timezone (for timestamptz queries). */
 export function dayStartInstant(day) {
-  const guess = new Date(`${day}T00:00:00Z`);
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: TZ, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
-  }).formatToParts(guess);
-  const get = (t) => Number(parts.find((p) => p.type === t).value);
-  const asLocal = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'));
-  const offset = asLocal - guess.getTime();
-  return new Date(guess.getTime() - offset);
+  return new Date(wallToInstant(Date.parse(`${day}T00:00:00Z`)));
 }
 export const dayEndInstant = (day) => dayStartInstant(addDays(day, 1));
 
@@ -83,15 +118,15 @@ export function weekdayLabels(style = 'short') {
 /** 'YYYY-MM-DDTHH:mm' for <input type=datetime-local>, in the user's timezone. */
 export function toLocalInput(instant) {
   const d = instant instanceof Date ? instant : new Date(instant);
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: TZ, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
-  }).formatToParts(d);
+  if (Number.isNaN(d.getTime())) return '';
+  const parts = partsFmt().formatToParts(d);
   const g = (t) => parts.find((p) => p.type === t).value;
-  return `${g('year')}-${g('month')}-${g('day')}T${g('hour')}:${g('minute')}`;
+  return `${g('year')}-${g('month')}-${g('day')}T${String(Number(g('hour')) % 24).padStart(2, '0')}:${g('minute')}`;
 }
 /** Inverse of toLocalInput — interprets the value in the user's timezone. */
 export function fromLocalInput(value) {
   const [day, time] = value.split('T');
   const [h, m] = time.split(':').map(Number);
-  return new Date(dayStartInstant(day).getTime() + (h * 60 + m) * 60000);
+  // Offset of the target wall time itself (not of midnight): differs on DST-change days.
+  return new Date(wallToInstant(Date.parse(`${day}T00:00:00Z`) + (h * 60 + m) * 60000));
 }

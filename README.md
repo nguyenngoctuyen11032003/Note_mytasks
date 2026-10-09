@@ -13,20 +13,23 @@ npm run build          # build ra dist/
 
 Chỉ hai biến `VITE_*` được đưa vào trình duyệt. Thiếu một trong hai, app hiển thị màn hình “Chưa kết nối Supabase”.
 
-## Các trang
+## Tính năng
 
-| # | Đường dẫn | Nội dung |
-|---|---|---|
-| — | `#/login` `#/signup` `#/forgot-password` `#/reset-password` | Đăng nhập, đăng ký, gửi và đặt lại mật khẩu (PKCE) |
-| 01 | `#/dashboard` | Việc hôm nay, đồng hồ, hoạt động gần đây, giờ làm 14 ngày, chi tiêu tháng, KPI, mua sắm |
-| 02 | `#/tasks` | Danh sách (nhóm theo hạn) / Bảng kéo-thả; lọc, tìm, thẻ, bấm giờ từ từng việc; phím `N` |
-| 03 | `#/calendar` | Lịch tháng: việc theo hạn chót, giờ làm, khoản chi; panel chi tiết ngày |
-| 04 | `#/time` | Đồng hồ bấm giờ (bắt đầu / tạm dừng / tiếp tục / dừng), ghi giờ thủ công, nhật ký, thống kê |
-| 05 | `#/kpi` | Thẻ KPI có vòng tiến độ, so với tiến độ kỳ vọng, lịch sử, cập nhật số liệu |
-| 06 | `#/expenses` | Khoản chi theo tháng, ngân sách carry-forward theo danh mục, dự báo cuối tháng |
-| 07 | `#/shopping` | Danh sách mua; “Đã mua” có thể ghi thành khoản chi |
-| 08 | `#/reports` | Báo cáo theo khoảng ngày, so với kỳ trước; xuất CSV |
-| 09 | `#/settings` | Hồ sơ, tiền tệ, múi giờ, ngày đầu tuần, giao diện, danh mục, đổi mật khẩu |
+| Trang | Nội dung |
+|---|---|
+| `#/login` `#/signup` `#/forgot-password` `#/reset-password` | Đăng nhập, đăng ký, gửi và đặt lại mật khẩu (PKCE) |
+| Tổng quan `#/dashboard` | Tiêu điểm hôm nay, đồng hồ, gợi ý thông minh, nhịp 14 ngày, chi tiêu theo danh mục, ngân sách tháng, ghi chú & hoạt động gần đây |
+| Ghi chú `#/notes` | Markdown (xem trước / chia đôi), sổ ghi chú, thẻ, màu, ghim, lưu trữ, thùng rác; mẫu checklist / nhật ký / biên bản họp; liên kết công việc, tạo việc từ checklist; tìm toàn văn |
+| Công việc `#/tasks` | Danh sách / bảng kéo-thả; nhập nhanh bằng ngôn ngữ tự nhiên (`mai 9h #sales !cao ~30p hằng tuần`); lặp lại, lọc, thẻ, chọn nhiều; ngăn chi tiết; bấm giờ từng việc; phím tắt (`?`) |
+| Lịch `#/calendar` | Tháng / tuần / lịch trình: việc theo hạn, giờ làm, khoản chi |
+| Thời gian `#/time` | Bấm giờ + Pomodoro, chế độ tập trung, ghi giờ thủ công, dòng thời gian tuần, ước tính so với thực tế |
+| Mục tiêu KPI `#/kpi` | Dự báo hoàn thành, đúng / chậm tiến độ, lịch sử ghi nhận |
+| Chi tiêu `#/expenses` | Nhập nhanh (`50k cà phê`), ngày / tuần / tháng / tùy chọn; biểu đồ nhịp, cơ cấu, lũy kế & ngân sách, thứ trong tuần; ngân sách theo danh mục, khoản bất thường |
+| Mua sắm `#/shopping` | Danh sách mua; “Đã mua” ghi thành khoản chi |
+| Báo cáo `#/reports` | Tuần / tháng / quý / năm / tùy chọn, so với kỳ trước; CSV; in / PDF (luôn in bằng bảng màu sáng) |
+| Cài đặt `#/settings` | Hồ sơ, tiền tệ, múi giờ, giao diện sáng/tối, danh mục, mật khẩu, sao lưu / khôi phục JSON |
+
+Toàn cục: bảng lệnh `Ctrl/⌘+K`, `G` + phím để chuyển trang, `N` tạo mới, `?` bảng phím tắt; PWA cài được; giao diện “Coffee Glass” cho điện thoại và laptop (thanh tab dưới trên điện thoại). Icon PWA: `npm run icons` (`scripts/gen-icons.mjs`).
 
 ## Cấu trúc `src/`
 
@@ -45,3 +48,9 @@ Không cần server: GitHub Actions kiểm tra + build, GitHub Pages phục vụ
 - **Push `main`** → [Deploy](.github/workflows/deploy.yml): CI → `supabase db push` (chỉ khi có migration mới, cần duyệt) → build → GitHub Pages.
 
 Thiết lập một lần (Pages, environment `production`, Secrets/Variables, Auth URL) và quy tắc an toàn database: xem [docs/DEPLOY.md](docs/DEPLOY.md).
+
+Tóm tắt: (1) bật GitHub Pages với nguồn “GitHub Actions”; (2) đặt Variables `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (chỉ anon/publishable key); (3) thêm `https://<user>.github.io/Note_mytasks/` vào Supabase Auth → URL Configuration; (4) push `main`. App được phục vụ dưới `/Note_mytasks/` (Vite `base: './'`, hash router nên không cần rewrite).
+
+**Migration Ghi chú:** trang Ghi chú cần `supabase/migrations/20261009000700_notes.sql` (bảng `notes` + RLS + tìm kiếm toàn văn) cùng các migration sau nó (`000800`, `000900`…). Workflow Deploy tự `db push` khi có migration mới (cần duyệt environment `production`); chạy tay: `npm run db:push`. Chưa áp dụng thì trang Ghi chú báo lỗi, các trang khác vẫn chạy.
+
+Kiểm thử: `npm test` (unit), `npm run test:integration` (cần `npx supabase start`, chỉ chạy với Supabase local).

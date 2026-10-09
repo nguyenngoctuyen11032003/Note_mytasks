@@ -61,6 +61,7 @@ const GROUP_BY = [
 ];
 const BOARD_COLS = ['todo', 'in_progress', 'completed'];
 const BOARD_DONE_LIMIT = 20;
+const PAGE_SIZE = 50;
 const PRIO_ORDER = ['urgent', 'high', 'medium', 'low'];
 const DEFAULTS = { view: 'list', scope: 'open', group: 'category', sort: 'due', cat: '', prio: '', tag: '', due: '', q: '' };
 const QA_EXAMPLE = 'Gửi báo giá cho khách mai 9h #sales !cao ~30p hằng tuần';
@@ -112,6 +113,7 @@ export default async function tasksPage(root, { query }) {
   let anchorId = null;
   let selecting = false;
   let filtersOpen = false;
+  let pageLimit = PAGE_SIZE;
   const selected = new Set();
   const collapsed = new Set(readLS(LS_COLLAPSED, []));
   const disposers = [];
@@ -120,12 +122,10 @@ export default async function tasksPage(root, { query }) {
   mount(root, html`
     <div class="tk-page">
     ${pageHead({
-      num: '03',
-      kicker: 'Công việc',
-      title: 'Những việc <em>cần làm</em>',
+      title: 'Những việc cần làm',
       lede: 'Gõ như nói chuyện để thêm việc, kéo thả để đổi trạng thái, bấm giờ ngay trên từng việc.',
       actions: html`
-        <button type="button" class="btn btn--ghost" data-act="help" title="Phím tắt và cú pháp (?)">${icon('keyboard')}<span class="tk-hide-sm">Phím tắt</span></button>
+        <button type="button" class="btn btn--ghost tk-help-btn" data-act="help" title="Phím tắt và cú pháp (?)">${icon('keyboard')}<span>Phím tắt</span></button>
         <button type="button" class="btn btn--primary" data-act="new">${icon('plus')} Công việc mới</button>`,
     })}
 
@@ -180,7 +180,11 @@ export default async function tasksPage(root, { query }) {
   // Phones: the long example placeholder gets clipped — use a shorter one below 600px.
   const mqNarrow = window.matchMedia('(max-width: 599px)');
   const QA_PH_LONG = qaInput.placeholder;
-  const syncQaPlaceholder = () => { qaInput.placeholder = mqNarrow.matches ? 'Thêm việc… vd: Gọi khách 9h mai' : QA_PH_LONG; };
+  const searchInput = $('[data-f="q"]');
+  const syncQaPlaceholder = () => {
+    qaInput.placeholder = mqNarrow.matches ? 'Thêm việc nhanh…' : QA_PH_LONG;
+    searchInput.placeholder = mqNarrow.matches ? 'Tìm việc…' : 'Tìm tiêu đề, mô tả, thẻ…';
+  };
   syncQaPlaceholder();
   mqNarrow.addEventListener?.('change', syncQaPlaceholder);
   disposers.push(() => mqNarrow.removeEventListener?.('change', syncQaPlaceholder));
@@ -440,8 +444,11 @@ export default async function tasksPage(root, { query }) {
   }
 
   function renderList() {
-    const rows = visible();
-    if (!rows.length) { mount($('[data-body]'), html`<div class="sheet tk-sheet">${emptyFor()}</div>`); return; }
+    const all = visible();
+    if (!all.length) { mount($('[data-body]'), html`<div class="sheet tk-sheet">${emptyFor()}</div>`); return; }
+    // Pagination: render PAGE_SIZE rows at a time (keeps long lists fast on phones).
+    const rows = all.slice(0, pageLimit);
+    const rest = all.length - rows.length;
     let groups;
     if (f.view === 'group') groups = f.group === 'priority' ? priorityGroups(rows) : categoryGroups(rows);
     else if (f.scope === 'done') groups = doneGroups(rows);
@@ -450,7 +457,8 @@ export default async function tasksPage(root, { query }) {
     mount($('[data-body]'), html`
       <div class="sheet tk-sheet">
         ${groups.map(groupTpl)}
-        <div class="sheet__foot tk-foot"><span class="mono">${num(rows.length)} / ${num(total)} công việc</span><span class="tk-hide-sm"><kbd>J</kbd><kbd>K</kbd> di chuyển · <kbd>Space</kbd> hoàn thành · <kbd>Enter</kbd> mở · <kbd>?</kbd> trợ giúp</span></div>
+        ${rest > 0 ? html`<div class="tk-more"><button type="button" class="btn btn--sm" data-act="more-rows">${icon('chevronDown')} Hiển thị thêm ${num(Math.min(PAGE_SIZE, rest))} việc</button><span class="tk-more__left">Còn ${num(rest)} việc chưa hiển thị</span></div>` : ''}
+        <div class="sheet__foot tk-foot"><span>Đang hiển thị ${num(rows.length)} / ${num(all.length)} việc${all.length !== total ? html` <span class="faint">(${num(total)} trong mục này)</span>` : ''}</span><span class="tk-hide-sm"><kbd>J</kbd><kbd>K</kbd> di chuyển · <kbd>Space</kbd> hoàn thành · <kbd>Enter</kbd> mở · <kbd>?</kbd> trợ giúp</span></div>
       </div>`);
   }
 
@@ -649,10 +657,15 @@ export default async function tasksPage(root, { query }) {
   const pickKeys = (o, keys) => Object.fromEntries(keys.map((k) => [k, o[k] ?? null]));
 
   async function removeTask(t) {
-    if ((Number(t.actual_minutes) || 0) > 0) {
-      const ok = await confirmDialog({ title: 'Xóa công việc này?', message: `“${t.title}” đã có ${minutes(t.actual_minutes)} bấm giờ. Các phiên tính giờ vẫn được giữ nhưng sẽ không còn gắn với công việc.` });
-      if (!ok) return;
-    }
+    const tracked = (Number(t.actual_minutes) || 0) > 0;
+    const ok = await confirmDialog({
+      title: 'Xóa công việc này?',
+      message: tracked
+        ? `“${t.title}” đã có ${minutes(t.actual_minutes)} bấm giờ. Các phiên tính giờ vẫn được giữ nhưng sẽ không còn gắn với công việc.`
+        : `“${t.title}” sẽ bị xóa. Bạn có thể hoàn tác ngay sau đó.`,
+      confirmLabel: 'Xóa công việc',
+    });
+    if (!ok) return;
     const snap = { ...t };
     const idx = tasks.findIndex((x) => x.id === t.id);
     removeLocal(t.id);
@@ -684,6 +697,11 @@ export default async function tasksPage(root, { query }) {
     const raw0 = text.trim();
     if (!raw0) return;
     const p = parseTaskInput(raw0, { categories: store.get().categories });
+    if (!p.title || !p.title.trim()) {
+      toast.error('Hãy nhập tiêu đề cho công việc — chỉ có thẻ, ngày hoặc ưu tiên thì chưa đủ.');
+      qaInput.focus();
+      return;
+    }
     const ctx = contextDefaults();
     const payload = {
       title: p.title.slice(0, 200),
@@ -1043,6 +1061,7 @@ export default async function tasksPage(root, { query }) {
   }
   function setF(patch) {
     Object.assign(f, patch);
+    pageLimit = PAGE_SIZE;
     persist();
     render();
   }
@@ -1066,6 +1085,7 @@ export default async function tasksPage(root, { query }) {
       case 'focus-qa': qaInput.focus(); qaInput.scrollIntoView({ block: 'center', behavior: reduced() ? 'auto' : 'smooth' }); return;
       case 'try-example': qaInput.value = QA_EXAMPLE; renderPreview(); qaInput.focus(); return;
       case 'see-done': return setF({ view: 'list', scope: 'done' });
+      case 'more-rows': pageLimit += PAGE_SIZE; return render();
       case 'collapse': {
         const g = el.closest('[data-group]');
         const key = g.dataset.group;
@@ -1116,7 +1136,7 @@ export default async function tasksPage(root, { query }) {
     const s = ledgerState.stats.find((x) => x.k === el.dataset.ledger);
     if (s) setF({ ...s.apply, view: f.view === 'board' ? 'list' : f.view });
   }));
-  const onSearch = debounce(() => { persist(); render(); }, 140);
+  const onSearch = debounce(() => { pageLimit = PAGE_SIZE; persist(); render(); }, 140);
   disposers.push(on(root, 'input', '[data-f="q"]', (e, el) => { f.q = el.value; onSearch(); }));
   disposers.push(on(root, 'change', 'select[data-f]', (e, el) => setF({ [el.dataset.f]: el.value })));
 

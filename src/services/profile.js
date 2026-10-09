@@ -5,8 +5,14 @@ export const PROFILE_COLS = 'id, display_name, avatar_url, currency, locale, tim
 export const PROFILE_WRITABLE = ['display_name', 'currency', 'locale', 'timezone', 'week_starts_on', 'theme', 'avatar_url'];
 export const THEMES = ['light', 'dark', 'system'];
 
+// Postgres (profiles_validate_timezone → pg_timezone_names) matches names exactly,
+// while Intl also accepts lower-case names and "+07:00"-style offsets. Require the
+// canonical IANA shape first ("Asia/Ho_Chi_Minh", "UTC", "Etc/GMT+7") so a value
+// that passes here can't fail on the server.
+const IANA_SHAPE = /^[A-Z][A-Za-z0-9_+-]*(?:\/[A-Z][A-Za-z0-9_+-]*)*$/;
+
 export function isValidTimezone(tz) {
-  if (typeof tz !== 'string' || !tz.trim()) return false;
+  if (typeof tz !== 'string' || !IANA_SHAPE.test(tz)) return false;
   try {
     if (typeof Intl.supportedValuesOf === 'function' && Intl.supportedValuesOf('timeZone').includes(tz)) return true;
   } catch { /* fall through */ }

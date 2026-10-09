@@ -29,6 +29,8 @@
       try {
         var t = localStorage.getItem('nm.theme');
         if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+        var s = localStorage.getItem('nm.skin');
+        if (s && /^(f1|z-[a-z]+)$/.test(s)) document.documentElement.dataset.skin = s;
         // Desktop sidebar collapsed to an icon rail (shell.js) — also before paint.
         if (localStorage.getItem('nm.sidebar') === 'rail') document.documentElement.dataset.sidebar = 'rail';
       } catch (e) {}

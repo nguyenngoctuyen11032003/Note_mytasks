@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "icons": "node scripts/gen-icons.mjs",
     "db:check": "node scripts/db/check.mjs",
     "db:test": "node scripts/db/test.mjs",
     "db:seed": "node scripts/db/seed.mjs",

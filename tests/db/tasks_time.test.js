@@ -429,13 +429,13 @@ describe('timer_current', () => {
     expect(c.task_total_seconds).toBe(3600 + c.elapsed_seconds);
   });
 
-  it('timer without task: task_title and task_total_seconds null', async () => {
+  it('timer without task: task_title null, task_total_seconds = elapsed (001000)', async () => {
     await clearTime(a);
     await one(a, 'select * from public.start_timer()');
     const { c } = await one(a, 'select public.timer_current() as c');
     expect(c.task_title).toBeNull();
-    expect(c.task_total_seconds).toBeNull();
     expect(c.elapsed_seconds).toBeGreaterThanOrEqual(0);
+    expect(c.task_total_seconds).toBe(c.elapsed_seconds);
   });
 
   it('B never sees A\'s running timer', async () => {

@@ -1,3 +1,4 @@
+/* Per-page style sheets (one owner each) */
 @import './pages/notes.css';
 @import './pages/tasks.css';
 @import './pages/dashboard.css';
@@ -30,7 +31,6 @@
 .mini-list .num { font-size: var(--fs-xs); }
 
 /* ---------- Dashboard ---------- */
-
 .timeline { list-style: none; margin: 0; padding: var(--s-2) var(--s-5) var(--s-4); position: relative; }
 .timeline__item { display: flex; gap: var(--s-3); padding: var(--s-2) 0; position: relative; }
 .timeline__item:not(:last-child)::after { content: ''; position: absolute; left: 13px; top: 36px; bottom: -6px; width: 1px; background: var(--rule); }
@@ -44,14 +44,12 @@
 .donut__center { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; pointer-events: none; gap: 2px; }
 .donut__center strong { font-size: var(--fs-xl); font-weight: 500; }
 
-
 /* ---------- Shared bits (tags, running icon) ---------- */
 .tag.is-on { background: var(--ink); color: var(--paper); border-style: solid; border-color: var(--ink); }
 .tag.is-on::before { color: inherit; opacity: 0.6; }
 button.tag { cursor: pointer; }
 button.tag:hover { border-color: var(--ink-3); }
 .icon-btn.is-running { color: var(--accent); background: var(--accent-soft); }
-
 
 /* ---------- Expenses ---------- */
 .budget-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-2) var(--s-6); border-top: 1px solid var(--rule); padding-top: var(--s-4); }
@@ -65,4 +63,3 @@ button.tag:hover { border-color: var(--ink-3); }
 /* ---------- Reports ---------- */
 .table tfoot td { border-top: 1px solid var(--ink); border-bottom: 0; background: var(--surface-2); }
 
-/* Per-page style sheets (one owner each) */

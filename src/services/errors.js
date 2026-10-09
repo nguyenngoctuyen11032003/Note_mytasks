@@ -17,6 +17,7 @@ import { supabase } from '../core/supabase.js';
 export const MESSAGES = {
   not_configured: 'Ứng dụng chưa được cấu hình kết nối Supabase.',
   network: 'Không kết nối được máy chủ. Kiểm tra mạng và thử lại.',
+  server_error: 'Máy chủ đang gặp sự cố, vui lòng thử lại sau.',
   duplicate: 'Dữ liệu bị trùng với một mục đã có.',
   invalid_reference: 'Mục liên kết không tồn tại hoặc không thuộc về bạn.',
   invalid_input: 'Dữ liệu không hợp lệ.',
@@ -137,7 +138,9 @@ const SQL_MESSAGE_PATTERNS = [
 ];
 
 function isNetworkError(err, msg) {
-  if (err?.name === 'AuthRetryableFetchError') return true;
+  // supabase-js reports both "no response" (status 0/undefined) and gateway 5xx
+  // as AuthRetryableFetchError; only the former is a connectivity problem.
+  if (err?.name === 'AuthRetryableFetchError' && !err.status) return true;
   if (/failed to fetch|fetch failed|networkerror|network request failed|load failed/i.test(msg)) return true;
   return err instanceof TypeError && /fetch/i.test(msg);
 }
@@ -151,6 +154,7 @@ export function toAppError(err) {
   const code = err.code != null ? String(err.code) : '';
   const make = (c, details) => new AppError(c, undefined, { cause: err, details });
 
+  if (err.name === 'AuthRetryableFetchError' && Number(err.status) >= 500) return make('server_error');
   if (isNetworkError(err, msg)) return make('network');
 
   // RPC business errors: `raise exception using message = '<code>'`.
@@ -262,13 +266,21 @@ export function vText(v, field, { required = false, min = required ? 1 : 0, max,
   return s;
 }
 
-/** Number parsing; '' / null → null (unless required). */
+// Plain decimal notation only: no hex/binary/octal ('0x10'), no dangling exponent ('1e').
+const NUMBER_RE = /^\s*[-+]?(\d+(\.\d+)?|\.\d+)(e[-+]?\d+)?\s*$/i;
+// Vietnamese thousands grouping ('1.000', '12.500.000') would silently read as a
+// small decimal: rejected (money inputs go through parseMoney in the pages).
+const GROUPED_RE = /^\s*[-+]?[1-9]\d{0,2}(\.\d{3})+\s*$/;
+
+/** Number parsing; '' / null → null (unless required). Accepts numbers and decimal strings only. */
 export function vNumber(v, field, { required = false, min, max, gt, integer = false, label = 'Giá trị' } = {}) {
   if (v == null || (typeof v === 'string' && v.trim() === '')) {
     if (required) throw invalid(field, `${label} không được để trống.`);
     return null;
   }
-  const n = typeof v === 'number' ? v : Number(String(v).trim());
+  let n = NaN;
+  if (typeof v === 'number') n = v;
+  else if (typeof v === 'string' && NUMBER_RE.test(v) && !GROUPED_RE.test(v)) n = Number(v.trim());
   if (!Number.isFinite(n)) throw invalid(field, `${label} phải là số.`);
   if (integer && !Number.isInteger(n)) throw invalid(field, `${label} phải là số nguyên.`);
   if (gt != null && !(n > gt)) throw invalid(field, `${label} phải lớn hơn ${gt}.`);
@@ -360,6 +372,22 @@ export function numify(rows, fields) {
   if (typeof rows !== 'object') return rows;
   const out = { ...rows };
   for (const f of fields) if (f in out) out[f] = toNum(out[f]);
+  return out;
+}
+
+/**
+ * Await every page of `query` (filtered and stably ordered — the order must end
+ * with a unique column such as 'id'). PostgREST caps each response at max_rows
+ * (1000), so one request would silently truncate. Stops after `cap` rows.
+ */
+export async function fetchPaged(query, cap = Infinity, page = 1000) {
+  const out = [];
+  while (out.length < cap) {
+    const want = Math.min(page, cap - out.length);
+    const rows = (await run(query.range(out.length, out.length + want - 1))) || [];
+    out.push(...rows);
+    if (rows.length < want) break;
+  }
   return out;
 }
 

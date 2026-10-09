@@ -10,21 +10,23 @@ import { today } from '../utils/date.js';
 import { onTick, onPomodoro, pomodoro, formatCountdown, sessionSeconds, pausedSession } from './timer.js';
 import { popMenu } from './ui.js';
 import { applyTheme, currentThemePref, onThemeChange } from './theme.js';
+import { toast } from './toast.js';
+import { updateProfile } from '../services/profile.js';
 
 export const NAV = [
   { group: 'Làm việc' },
-  { path: '/dashboard', num: '01', label: 'Tổng quan', icon: 'dashboard' },
-  { path: '/notes', num: '02', label: 'Ghi chú', icon: 'note' },
-  { path: '/tasks', num: '03', label: 'Công việc', icon: 'tasks' },
-  { path: '/calendar', num: '04', label: 'Lịch', icon: 'calendar' },
-  { path: '/time', num: '05', label: 'Thời gian', icon: 'clock' },
-  { path: '/kpi', num: '06', label: 'Mục tiêu KPI', icon: 'target' },
+  { path: '/dashboard', label: 'Tổng quan', icon: 'dashboard' },
+  { path: '/notes', label: 'Ghi chú', icon: 'note' },
+  { path: '/tasks', label: 'Công việc', icon: 'tasks' },
+  { path: '/calendar', label: 'Lịch', icon: 'calendar' },
+  { path: '/time', label: 'Thời gian', icon: 'clock' },
+  { path: '/kpi', label: 'Mục tiêu KPI', icon: 'target' },
   { group: 'Tài chính' },
-  { path: '/expenses', num: '07', label: 'Chi tiêu', icon: 'wallet' },
-  { path: '/shopping', num: '08', label: 'Mua sắm', icon: 'cart' },
+  { path: '/expenses', label: 'Chi tiêu', icon: 'wallet' },
+  { path: '/shopping', label: 'Mua sắm', icon: 'cart' },
   { group: 'Tổng hợp' },
-  { path: '/reports', num: '09', label: 'Báo cáo', icon: 'chart' },
-  { path: '/settings', num: '10', label: 'Cài đặt', icon: 'settings' },
+  { path: '/reports', label: 'Báo cáo', icon: 'chart' },
+  { path: '/settings', label: 'Cài đặt', icon: 'settings' },
 ];
 
 /** Bottom tab bar (phones): two tabs · quick-add · one tab + "Thêm" (symmetric 2 + FAB + 2).
@@ -52,12 +54,12 @@ export function mountShell(app, { onSignOut, onQuickAdd, onSearch }) {
   const tab = (t) => html`<a class="tabbar__tab" href="#${t.path}" data-path="${t.path}">${icon(t.icon)}<span>${t.label}</span></a>`;
   mount(app, html`
     <div class="shell">
-      <a class="skip-link" href="#/" data-act="skip">Bỏ qua, tới nội dung chính</a>
+      <a class="skip-link" href="#content" data-act="skip">Bỏ qua, tới nội dung chính</a>
       <aside class="sidebar" id="sidebar" aria-label="Điều hướng chính">
         <div class="sidebar__top">
           <a class="brand" href="#/dashboard" aria-label="Note_mytasks — Tổng quan">
             <span class="brand__mark" aria-hidden="true">N</span>
-            <span class="brand__text"><span class="brand__name">Note<em>_</em>mytasks</span><span class="brand__sub">Sổ tay cá nhân</span></span>
+            <span class="brand__text"><span class="brand__name">Note_mytasks</span><span class="brand__sub">Sổ tay cá nhân</span></span>
           </a>
           <button class="icon-btn sidebar__close" type="button" data-act="close-nav" aria-label="Đóng menu">${icon('x')}</button>
         </div>
@@ -67,7 +69,7 @@ export function mountShell(app, { onSignOut, onQuickAdd, onSearch }) {
             : html`<a class="nav__item" href="#${n.path}" data-path="${n.path}" data-tip="${n.label}">${icon(n.icon)}<span class="nav__label">${n.label}</span><span data-badge="${n.path}"></span></a>`)}
         </nav>
         <div class="sidebar__foot">
-          <a class="usercard" href="#/settings" data-usercard></a>
+          <button class="usercard" type="button" data-act="user-menu" data-usercard aria-haspopup="menu"></button>
           <button class="rail-toggle" type="button" data-act="rail" aria-pressed="false">
             ${icon('chevronLeft')}<span class="rail-toggle__label">Thu gọn</span>
           </button>
@@ -78,18 +80,17 @@ export function mountShell(app, { onSignOut, onQuickAdd, onSearch }) {
         <header class="topbar">
           <button class="icon-btn topbar__menu" type="button" data-act="open-nav" aria-label="Mở menu" aria-controls="sidebar" aria-expanded="false">${icon('menu')}</button>
           <div class="topbar__crumb">
-            <span class="topbar__sect" data-sect></span>
             <span class="topbar__title" data-title></span>
             <span class="topbar__date">${day(today(), 'long')}</span>
           </div>
           <div class="topbar__spacer"></div>
           <div class="topbar__actions">
-            <button class="topbar__search" type="button" data-act="search" aria-label="Tìm kiếm và lệnh (${isMac ? '⌘' : 'Ctrl'}+K)" aria-haspopup="dialog">
+            <button class="topbar__search" type="button" data-act="search" aria-label="Tìm kiếm và lệnh (${isMac ? '⌘' : 'Ctrl'}+K)" aria-haspopup="dialog" title="Tìm kiếm (${isMac ? '⌘' : 'Ctrl'}+K hoặc /)">
               ${icon('search')}<span class="topbar__search-text">Tìm hoặc chạy lệnh…</span><span class="topbar__search-kbd"><kbd>${isMac ? '⌘' : 'Ctrl'}</kbd><kbd>K</kbd></span>
             </button>
             <span data-timer></span>
             <button class="icon-btn" type="button" data-act="theme" aria-label="Đổi giao diện sáng/tối" aria-haspopup="menu">${icon('sun')}</button>
-            <button class="btn btn--primary btn--sm topbar__add" type="button" data-act="quick-add" aria-haspopup="menu">${icon('plus')}<span>Tạo mới</span></button>
+            <button class="btn btn--primary btn--sm topbar__add" type="button" data-act="quick-add" aria-haspopup="menu" title="Tạo mới (N)">${icon('plus')}<span>Tạo mới</span></button>
           </div>
         </header>
         <main class="content" id="content" tabindex="-1"></main>
@@ -99,7 +100,7 @@ export function mountShell(app, { onSignOut, onQuickAdd, onSearch }) {
         <button class="tabbar__fab" type="button" data-act="quick-add" aria-haspopup="menu" aria-label="Tạo mới">${icon('plus')}</button>
         <div class="tabbar__side">
           ${TABS_RIGHT.map(tab)}
-          <button class="tabbar__tab" type="button" data-act="open-nav" aria-controls="sidebar" aria-expanded="false">${icon('menu')}<span>Thêm</span></button>
+          <button class="tabbar__tab" type="button" data-act="open-nav" aria-controls="sidebar" aria-expanded="false" aria-label="Thêm trang và tài khoản">${icon('menu')}<span>Thêm</span></button>
         </div>
       </nav>
     </div>`);
@@ -134,14 +135,29 @@ export function mountShell(app, { onSignOut, onQuickAdd, onSearch }) {
     if (act === 'search') onSearch?.();
     if (act === 'rail') toggleRail();
     if (act === 'signout') onSignOut();
+    if (act === 'user-menu') userMenu(el, onSignOut);
   }));
-  unsubs.push(on(root, 'click', '.nav__item, .usercard, .brand', () => { if (root.classList.contains('nav-open')) setNav(false, null, false); }));
+  unsubs.push(on(root, 'click', '.nav__item, .brand', () => { if (root.classList.contains('nav-open')) setNav(false, null, false); }));
 
   const onKey = (e) => {
-    if (e.key === 'Escape' && root?.classList.contains('nav-open')) setNav(false);
+    if (e.key !== 'Escape' || !root?.classList.contains('nav-open')) return;
+    // A popover menu opened from the drawer closes first.
+    if (document.querySelector('.menu')) return;
+    setNav(false);
   };
   document.addEventListener('keydown', onKey);
   unsubs.push(() => document.removeEventListener('keydown', onKey));
+
+  // Keep keyboard focus inside the open drawer (Tab / Shift+Tab wrap).
+  unsubs.push(on(root, 'keydown', '.sidebar', (e) => {
+    if (e.key !== 'Tab' || !root.classList.contains('nav-open')) return;
+    const items = [...root.querySelectorAll('.sidebar a[href], .sidebar button')].filter((b) => b.getClientRects().length);
+    if (!items.length) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  }));
 
   // Phones: tuck the tab bar away while reading downwards, bring it back on
   // any upward scroll or near the end of the page.
@@ -190,11 +206,11 @@ export function setActive(path) {
     else a.removeAttribute('aria-current');
   });
   const inTabs = [...TABS_LEFT, ...TABS_RIGHT].some((t) => t.path === path);
-  root.querySelector('.tabbar [data-act="open-nav"]')?.classList.toggle('is-current', !inTabs);
-  root.querySelector('[data-sect]').textContent = '';
-  root.querySelector('[data-title]').textContent = item?.label || '';
+  root.querySelector('.tabbar [data-act="open-nav"]')?.classList.toggle('is-current', Boolean(item) && !inTabs);
+  const title = item?.label || 'Không tìm thấy trang';
+  root.querySelector('[data-title]').textContent = title;
   root.classList.remove('tabbar-hidden');
-  document.title = item ? `${item.label} · Note_mytasks` : 'Note_mytasks';
+  document.title = `${title} · Note_mytasks`;
 }
 
 export function setBadge(path, value) {
@@ -212,6 +228,7 @@ export function focusContent() {
   const target = h1 || content;
   if (h1 && !h1.hasAttribute('tabindex')) h1.setAttribute('tabindex', '-1');
   target.focus({ preventScroll: true });
+  if (!h1) content.scrollIntoView?.({ block: 'start' });
 }
 
 function setNav(open, opener = null, restoreFocus = true) {
@@ -219,6 +236,7 @@ function setNav(open, opener = null, restoreFocus = true) {
   root.classList.toggle('nav-open', open);
   root.querySelectorAll('[data-act="open-nav"]').forEach((b) => b.setAttribute('aria-expanded', String(open)));
   const sidebar = root.querySelector('.sidebar');
+  document.documentElement.classList.toggle('nm-noscroll', open);
   if (open) {
     sidebar._opener = opener;
     // The rest of the page is inert while the drawer is open.
@@ -268,10 +286,11 @@ function renderUser() {
   const card = root.querySelector('[data-usercard]');
   card.dataset.tip = name;
   if (isRail()) card.title = name;
+  card.setAttribute('aria-label', `Tài khoản: ${name}${email ? ` (${email})` : ''}. Mở menu tài khoản`);
   mount(card, html`
-    <span class="avatar">${initials(name)}</span>
-    <span class="usercard__text truncate"><span class="usercard__name truncate" style="display:block">${name}</span><span class="usercard__mail truncate" style="display:block">${email}</span></span>
-    ${icon('settings', 'faint usercard__gear')}`);
+    <span class="avatar" aria-hidden="true">${initials(name)}</span>
+    <span class="usercard__text"><span class="usercard__name truncate">${name}</span><span class="usercard__mail truncate">${email}</span></span>
+    ${icon('chevronDown', 'faint usercard__gear')}`);
 }
 
 function renderThemeIcon() {
@@ -284,12 +303,46 @@ function renderThemeIcon() {
   btn.setAttribute('aria-label', `Giao diện: ${label}. Đổi giao diện`);
 }
 
+const THEME_OPTS = [
+  ['light', 'Sáng', 'sun'],
+  ['dark', 'Tối', 'moon'],
+  ['system', 'Theo hệ thống', 'monitor'],
+];
+
 function cycleTheme(anchor) {
+  const cur = currentThemePref();
+  popMenu(anchor, THEME_OPTS.map(([v, label, ic]) => ({
+    label: v === cur ? `${label} · đang dùng` : label,
+    icon: v === cur ? 'check' : ic,
+    onClick: () => setThemePref(v),
+  })));
+}
+
+/** Header switch: apply now, then save to the profile so the next sign-in
+ *  (which applies profiles.theme) does not undo the choice. */
+export async function setThemePref(pref) {
+  if (pref === currentThemePref()) return;
+  applyTheme(pref, { persist: true });
+  if (!store.get().user) return;
+  try {
+    const profile = await updateProfile({ theme: pref });
+    if (profile) store.set({ profile });
+  } catch {
+    toast.error('Đã đổi giao diện trên máy này nhưng chưa lưu được vào tài khoản.');
+  }
+}
+
+/* ---------- Account menu (sidebar foot / drawer) ---------- */
+function userMenu(anchor, onSignOut) {
   popMenu(anchor, [
-    { label: 'Sáng', icon: 'sun', onClick: () => applyTheme('light', { persist: true }) },
-    { label: 'Tối', icon: 'moon', onClick: () => applyTheme('dark', { persist: true }) },
-    { label: 'Theo hệ thống', icon: 'monitor', onClick: () => applyTheme('system', { persist: true }) },
+    { label: 'Hồ sơ & cài đặt', icon: 'settings', onClick: () => { closeDrawer(); navigate('/settings'); } },
+    { label: 'Phím tắt', icon: 'keyboard', onClick: () => { closeDrawer(); import('./shortcuts.js').then((m) => m.openShortcutHelp()); } },
+    'sep',
+    { label: 'Đăng xuất', icon: 'logout', onClick: () => { closeDrawer(); onSignOut(); } },
   ]);
+}
+function closeDrawer() {
+  if (root?.classList.contains('nav-open')) setNav(false, null, false);
 }
 
 /** Pomodoro break in progress (no running entry) → the chip shows "Nghỉ" + countdown. */
@@ -314,7 +367,7 @@ function renderTimer() {
   const time = brk ? formatCountdown(brk.remaining) : clock(sessionSeconds());
   mount(slot, html`
     <a class="timer-chip ${brk ? 'is-break' : paused ? 'is-paused' : ''}" href="#/time" title="${label}" aria-label="${state}: ${label}">
-      <span class="timer-chip__pulse"></span>
+      <span class="timer-chip__pulse" aria-hidden="true"></span>
       <span class="timer-chip__time" data-timer-text>${time}</span>
       <span class="timer-chip__task truncate">${label}</span>
     </a>`);

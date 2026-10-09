@@ -108,7 +108,7 @@ export function field({ label, name, hint, optional, control, id }) {
   return html`
     <div class="field">
       <label class="field__label" for="${fid}">${label}${optional ? html`<span class="opt">không bắt buộc</span>` : ''}</label>
-      ${raw(String(control).replace('__ID__', fid))}
+      ${raw(String(control).replace('id="__ID__"', `id="${fid}"`))}
       ${hint ? html`<span class="field__hint">${hint}</span>` : ''}
       <span class="field__error" role="alert"></span>
     </div>`;

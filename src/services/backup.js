@@ -15,6 +15,11 @@ import { toCSV, downloadText } from '../utils/csv.js';
 import { today } from '../utils/date.js';
 import { db, run, invalid } from './errors.js';
 import { fetchAll } from './reports.js';
+import { NOTE_WRITABLE } from './notes.js';
+
+// Note columns a backup may restore. Unknown columns (e.g. from a newer schema) are
+// dropped instead of failing every row.
+const NOTE_RESTORABLE = new Set([...NOTE_WRITABLE, 'created_at']);
 
 export const BACKUP_APP = 'note-mytasks';
 export const BACKUP_VERSION = 1;
@@ -73,7 +78,8 @@ async function readTable(table) {
  * exportAll() → { app, version, exported_at, tables: {name: rows[]}, counts, missing[] }
  * Optional tables that do not exist on the server are listed in `missing`.
  */
-export async function exportAll({ onProgress } = {}) {
+export async function exportAll(opts = {}) {
+  const { onProgress } = opts || {};
   const tables = {};
   const missing = [];
   for (const [i, t] of BACKUP_TABLES.entries()) {
@@ -81,8 +87,9 @@ export async function exportAll({ onProgress } = {}) {
     try {
       tables[t.table] = await readTable(t.table);
     } catch (e) {
-      // Optional tables (notes) may not exist yet on the server.
-      if (t.optional && (isMissingTable(e) || e?.code !== 'session_expired')) { missing.push(t.table); continue; }
+      // Optional tables (notes) may not exist yet on the server; any other
+      // failure (network, 5xx, expired session) must abort the export.
+      if (t.optional && isMissingTable(e)) { missing.push(t.table); continue; }
       throw e;
     }
   }
@@ -167,7 +174,9 @@ async function insertChunked(table, rows, report) {
   for (let i = 0; i < rows.length; i += CHUNK) {
     const part = rows.slice(i, i + CHUNK);
     try {
-      await run(c.from(table).insert(part));
+      // defaultToNull:false — a column missing from some rows of the batch gets its DB
+      // default instead of NULL (NULL broke NOT NULL columns such as tasks.tags).
+      await run(c.from(table).insert(part, { defaultToNull: false }));
       ok += part.length;
     } catch (e) {
       if (e?.code === 'session_expired' || e?.code === 'network') throw e;
@@ -337,7 +346,7 @@ export async function importAll(backup, { onProgress } = {}) {
     const notes = T.notes.map((r) => {
       const row = { id: maps.notes.get(r.id) };
       for (const [k, v] of Object.entries(r)) {
-        if (GENERIC_SKIP.has(k) || v === undefined) continue;
+        if (GENERIC_SKIP.has(k) || v === undefined || !NOTE_RESTORABLE.has(k)) continue;
         if (k in FK || (k.endsWith('_id') && k !== 'id')) row[k] = FK[k] ? mapFk(FK[k], v) : null;
         else row[k] = v;
       }

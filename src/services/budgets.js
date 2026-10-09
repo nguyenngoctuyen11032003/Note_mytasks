@@ -1,6 +1,6 @@
 // Budgets — carry-forward rows: "from effective_month on, the budget is X".
 // Writes go through RPC set_budget (upsert of the row for that month).
-import { today, startOfMonth, endOfMonth, diffDays } from '../utils/date.js';
+import { today, startOfMonth, endOfMonth, diffDays, addDays as addDaysTo } from '../utils/date.js';
 import { db, run, rpc, rpcOr, invalid, requireId, vNumber, vUuidOrNull, isDay, numify, single } from './errors.js';
 
 export const BUDGET_COLS = 'id, effective_month, category_id, amount, created_at, updated_at';
@@ -29,10 +29,16 @@ export async function status(month = null) {
   return normalizeStatus(await rpcOr('budget_status', { p_month: p }, () => legacyStatus(p)));
 }
 
+// Same rules as SQL budget_status (exact numeric): over = spent > budget,
+// warning = spent >= budget * 0.8. Compared in integer cents (spent*5 >= budget*4)
+// so float division can't flip the result at the 80 % boundary (8000.08 / 10000.10).
+const cents = (v) => Math.round(Number(v) * 100);
 function statusOf(budget, spent, projected) {
   if (budget == null) return 'no_budget';
-  if (budget > 0 ? spent / budget > 1 : spent > 0) return 'over';
-  if ((budget > 0 && spent / budget >= 0.8) || projected > budget) return 'warning';
+  const b = cents(budget);
+  const s = cents(spent);
+  if (b > 0 ? s > b : s > 0) return 'over';
+  if ((b > 0 && s * 5 >= b * 4) || cents(projected) > b) return 'warning';
   return 'ok';
 }
 
@@ -112,6 +118,63 @@ export function resolveBudgets(rows, month) {
     overall: overall ? Number(overall.amount) : null,
     byCategory: new Map([...latest].map(([k, r]) => [k, Number(r.amount)])),
   };
+}
+
+/** Pure: same status rule as budget_status (over > warning (≥ 80 % or projected over) > ok). */
+export function budgetState(budget, spent, projected) {
+  return statusOf(budget == null ? null : Number(budget), Number(spent) || 0, Number(projected) || 0);
+}
+
+/**
+ * Pure: amount at/above which a single expense counts as a one-off (rent,
+ * transfers, a big purchase) — it is counted once in a forecast but not
+ * extrapolated over the rest of the month. Infinity when history is thin.
+ */
+export function oneOffThreshold(history = []) {
+  const a = (history || []).map((x) => Number(x.amount)).filter((v) => v > 0).sort((x, y) => x - y);
+  if (a.length < 10) return Infinity;
+  const q = (p) => a[Math.min(a.length - 1, Math.floor(p * (a.length - 1)))];
+  return Math.max(q(0.9), q(0.5) * 5);
+}
+
+/**
+ * Pure: month-end forecast = everything recorded in the month + the routine
+ * daily rate × days left. The routine rate leaves out one-offs (≥ threshold)
+ * and, early in the month, leans on `baseRate` (routine spend per day before
+ * the month) so two days of data cannot swing it wildly.
+ * Past month → its total; future month → what is already planned.
+ */
+export function projectMonth(items, { month, today: t = today(), threshold = Infinity, baseRate = null, weight = 7 } = {}) {
+  const m = startOfMonth(month || t);
+  const end = endOfMonth(m);
+  let spent = 0, routine = 0;
+  for (const x of items || []) {
+    if (x.spent_on < m || x.spent_on > end) continue;
+    const v = Number(x.amount) || 0;
+    spent += v;
+    if (x.spent_on <= t && v < threshold) routine += v;
+  }
+  if (t < m || t >= end) return Math.round(spent * 100) / 100;
+  const elapsed = diffDays(t, m) + 1;
+  const left = diffDays(end, m) + 1 - elapsed;
+  const rate = baseRate != null && baseRate >= 0 ? (routine + baseRate * weight) / (elapsed + weight) : routine / elapsed;
+  return Math.round((spent + rate * left) * 100) / 100;
+}
+
+/**
+ * Pure: routine spend per day over the `days` before `month` (one-offs
+ * excluded), from a newest-first history. null when history does not reach.
+ */
+export function routineRate(history, { month, threshold = Infinity, days = 56 } = {}) {
+  const m = startOfMonth(month);
+  const list = (history || []).filter((x) => x.spent_on < m);
+  if (!list.length) return null;
+  const oldest = list.reduce((o, x) => (x.spent_on < o ? x.spent_on : o), m);
+  const span = Math.min(days, diffDays(m, oldest));
+  if (span < 14) return null;
+  const from = addDaysTo(m, -span);
+  const total = list.reduce((s, x) => s + (x.spent_on >= from && Number(x.amount) < threshold ? Number(x.amount) : 0), 0);
+  return total / span;
 }
 
 export { status as budgetStatus, listBudgets as list, deleteBudget as remove, deleteBudget as delete };

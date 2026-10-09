@@ -35,14 +35,14 @@
 .sp-pill--btn { cursor: pointer; }
 .sp-pill--btn:hover { border-color: var(--ink-3); color: var(--ink); }
 .sp-pill__dot { width: 8px; height: 8px; border-radius: 2px; transform: rotate(45deg); background: var(--c, var(--ink-4)); }
-.sp-pill__tag { display: inline-flex; align-items: center; gap: 3px; font-family: var(--font-mono); font-size: 10px; color: var(--accent-ink); }
+.sp-pill__tag { display: inline-flex; align-items: center; gap: 3px; font-size: var(--fs-2xs); color: var(--accent-ink); }
 .sp-pill__tag svg { width: 11px; height: 11px; }
 
 /* ---------- Stats ---------- */
 .sp-stat__v { font-size: var(--fs-2xl); overflow-wrap: anywhere; }
 
 /* ---------- Groups & rows ---------- */
-.sp-toolbar [data-groupby][hidden] { display: none; }
+.sp-toolbar [data-groupby][hidden], .sp-toolbar select[hidden] { display: none; }
 .sp-groups { display: grid; gap: var(--s-4); }
 .sp-group { overflow: hidden; }
 .sp-group__head {
@@ -51,7 +51,7 @@
 }
 .sp-group__title { display: inline-flex; align-items: center; min-width: 0; font-size: var(--fs-sm); font-weight: 600; }
 .sp-group__title .prio { font-size: var(--fs-sm); }
-.sp-group__title--month { font-family: var(--font-display); font-weight: 400; font-size: var(--fs-md); }
+.sp-group__title--month { font-weight: 600; font-size: var(--fs-sm); }
 .sp-group__meta { display: inline-flex; align-items: baseline; gap: var(--s-3); font-size: var(--fs-xs); color: var(--ink-3); white-space: nowrap; }
 .sp-group__meta strong { color: var(--ink); font-weight: 600; font-size: var(--fs-sm); }
 
@@ -104,7 +104,7 @@
 
 .sp-total {
   display: flex; justify-content: space-between; align-items: baseline; gap: var(--s-3); flex-wrap: wrap;
-  margin-top: var(--s-4); padding: var(--s-3) var(--s-1) 0; border-top: 1px solid var(--ink);
+  margin-top: var(--s-4); padding: var(--s-3) var(--s-1) 0; border-top: 1px solid var(--rule-strong);
   font-size: var(--fs-sm); color: var(--ink-3);
 }
 .sp-total strong { color: var(--ink); font-size: var(--fs-lg); font-weight: 500; margin-left: var(--s-2); }

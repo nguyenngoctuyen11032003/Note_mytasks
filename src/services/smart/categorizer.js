@@ -10,12 +10,20 @@
 //    w = M / (M + 1.2) where M = number of matching samples (1 → .45, 3 → .71, 10 → .89).
 // 2. keywords — a built-in Vietnamese dictionary mapped to the 9 default expense
 //    category NAMES (Ăn uống, Đi lại, …), matched on the normalised text, longest
-//    phrase first (so "nước mía" is a drink, "tiền nước" a utility bill, "điện thoại"
+//    phrase first (so "nước mía"/"nước mắm" are food, "tiền nước" a utility bill — bare
+//    "nước" is not a keyword — "điện thoại"
 //    is tech not electricity). Capped at 0.85 confidence.
 // final = w·history + (1−w)·0.85·keywords. With ≥ 3 matching history samples the
 // history vote outweighs a conflicting keyword vote. `source` = the larger contributor.
 
-import { normalizeVi } from './text.js';
+//
+// Accents: a token the user typed WITH diacritics only matches the same accented word
+// ("bé" ≠ "be", "diễn" ≠ "điện", "bìa" ≠ "bia", "sạch" ≠ "sách"); a token typed without
+// any diacritic matches loosely ("di be", "tien dien"). Dictionary keywords are spelled
+// correctly, so an ASCII keyword ("be", "bia") only matches an ASCII user token. History
+// descriptions may be unaccented, so a history token matches when either side is ASCII.
+
+import { normalizeVi, cleanText, foldAligned, hasDiacritics, toneKey } from './text.js';
 
 export { normalizeVi };
 
@@ -24,11 +32,18 @@ const STOPWORDS = new Set([
   'di', 'o', 'tai', 'luc', 'khi', 'thi', 'de', 'tien', 'mua', 'chi', 'phi', 'so',
 ]);
 
+/** Word tokens with folded form `f`, tone-insensitive accented key `k`, `acc` = typed with accents. */
+function richTokens(text, splitRe = /[^\p{L}\p{N}]+/u) {
+  return cleanText(text).split(splitRe).filter(Boolean).map((w) => {
+    const acc = hasDiacritics(w);
+    return { f: foldAligned(w), k: acc ? toneKey(w) : null, acc };
+  });
+}
+const keepToken = (t) => t.f.length >= 2 && !/^\d+([.,]\d+)*(k|tr|d|m)?\d*$/.test(t.f) && !STOPWORDS.has(t.f);
+
 /** Normalised word tokens (≥ 2 chars, no pure numbers / amounts, no stopwords). */
 export function tokenize(text) {
-  return normalizeVi(text)
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter((t) => t.length >= 2 && !/^\d+([.,]\d+)*(k|tr|d|m)?\d*$/.test(t) && !STOPWORDS.has(t));
+  return richTokens(text).filter(keepToken).map((t) => t.f);
 }
 const features = (tokens) => {
   const out = [...tokens];
@@ -48,6 +63,7 @@ export const KEYWORDS = {
     'bia', 'rượu', 'kem', 'chè', 'hủ tiếu', 'mì', 'mì cay', 'sushi', 'buffet', 'bánh tráng',
     'đồ ăn', 'thức ăn', 'grabfood', 'shopeefood', 'baemin', 'đi chợ', 'rau', 'thịt', 'cá',
     'trứng', 'gạo', 'sữa', 'hoa quả', 'trái cây', 'snack', 'tráng miệng', 'nước uống', 'đồ uống',
+    'nước dừa', 'nước mắm', 'nước chấm', 'nước chanh',
   ],
   'Đi lại': [
     'grab', 'grabbike', 'grabcar', 'be', 'gojek', 'xanh sm', 'taxi', 'xăng', 'đổ xăng', 'gửi xe',
@@ -57,7 +73,7 @@ export const KEYWORDS = {
     'xe ôm', 'uber', 'đi lại', 'cước xe', 'vá xe', 'thay lốp', 'đăng kiểm', 'bảo hiểm xe',
   ],
   'Nhà ở': [
-    'tiền nhà', 'thuê nhà', 'tiền phòng', 'tiền trọ', 'nhà trọ', 'điện', 'tiền điện', 'nước',
+    'tiền nhà', 'thuê nhà', 'tiền phòng', 'tiền trọ', 'nhà trọ', 'điện', 'tiền điện',
     'tiền nước', 'nước sạch', 'internet', 'wifi', 'cáp quang', 'vnpt', 'gas', 'bình gas',
     'phí quản lý', 'chung cư', 'tiền rác', 'sửa nhà', 'nội thất', 'dọn nhà', 'giúp việc',
     'điện nước', 'hóa đơn điện', 'hóa đơn nước', 'truyền hình cáp', 'chuyển nhà', 'sửa ống nước',
@@ -69,6 +85,7 @@ export const KEYWORDS = {
     'winmart', 'coopmart', 'bách hóa xanh', 'aeon', 'lotte mart', 'big c', 'go', 'vinmart',
     'đồ dùng', 'uniqlo', 'zara', 'h&m', 'circle k', 'gs25', 'ministop', '7 eleven', 'tạp hóa',
     'dầu gội', 'sữa tắm', 'kem đánh răng', 'giấy vệ sinh', 'bột giặt', 'quà', 'quà tặng',
+    'kem chống nắng', 'kem che nắng', 'sữa rửa mặt', 'cá nhân', 'đồ dùng cá nhân', 'bỉm', 'tã', 'đồ chơi',
   ],
   'Giải trí': [
     'netflix', 'spotify', 'youtube premium', 'phim', 'xem phim', 'rạp', 'cgv', 'lotte cinema',
@@ -104,23 +121,27 @@ export const KEYWORDS = {
   ],
 };
 
+const KW_SPLIT = /[^\p{L}\p{N}&]+/u;
 const DICT = Object.entries(KEYWORDS)
   .flatMap(([name, words]) => words.map((w) => {
-    const toks = normalizeVi(w).split(/[^\p{L}\p{N}&]+/u).filter(Boolean);
-    return { name: normalizeVi(name), toks, len: toks.join(' ').length };
+    const toks = richTokens(w, KW_SPLIT);
+    return { name: normalizeVi(name), toks, len: toks.map((t) => t.f).join(' ').length };
   }))
   .sort((a, b) => b.toks.length - a.toks.length || b.len - a.len);
 
+/** User token vs keyword token: an accented user token must be exactly the keyword word. */
+const kwTokenMatch = (u, k) => u.f === k.f && (!u.acc || u.k === (k.k ?? k.f));
+
 /** Keyword votes per normalised default-category name. */
 export function keywordScores(description) {
-  const toks = normalizeVi(description).split(/[^\p{L}\p{N}&]+/u).filter(Boolean);
+  const toks = richTokens(description, KW_SPLIT);
   const used = new Array(toks.length).fill(false);
   const scores = new Map();
   for (const k of DICT) {
     const n = k.toks.length;
     for (let i = 0; i + n <= toks.length; i++) {
       let ok = true;
-      for (let j = 0; j < n; j++) if (used[i + j] || toks[i + j] !== k.toks[j]) { ok = false; break; }
+      for (let j = 0; j < n; j++) if (used[i + j] || !kwTokenMatch(toks[i + j], k.toks[j])) { ok = false; break; }
       if (!ok) continue;
       for (let j = 0; j < n; j++) used[i + j] = true;
       scores.set(k.name, (scores.get(k.name) || 0) + n);
@@ -131,14 +152,25 @@ export function keywordScores(description) {
 
 // ---- history (naive Bayes) -----------------------------------------------------------
 
-function historyScores(queryFeatures, history, allowed) {
-  const qUni = new Set(queryFeatures.filter((f) => !f.includes('_')));
+function historyScores(queryTokens, history, allowed) {
+  const queryFeatures = features(queryTokens.map((t) => t.f));
+  const qUni = new Set(queryTokens.map((t) => t.f));
   if (!qUni.size) return { post: new Map(), matching: 0 };
+  // folded word → accented spellings the query used for it
+  const qAccents = new Map();
+  for (const t of queryTokens) {
+    if (!t.acc) continue;
+    if (!qAccents.has(t.f)) qAccents.set(t.f, new Set());
+    qAccents.get(t.f).add(t.k);
+  }
+  // A history word typed with other accents than the query's ("bể" vs "bé") is a
+  // different word: give it a distinct feature so it neither matches nor votes.
+  const docToken = (t) => (t.acc && qAccents.has(t.f) && !qAccents.get(t.f).has(t.k) ? `${t.f}~${t.k}` : t.f);
   const docs = [];
   for (const h of history || []) {
     if (!h || h.category_id == null || !h.description) continue;
     if (allowed && !allowed.has(h.category_id)) continue;
-    const toks = tokenize(h.description);
+    const toks = richTokens(h.description).filter(keepToken).map(docToken);
     if (!toks.length) continue;
     docs.push({ cat: h.category_id, toks, feats: features(toks) });
   }
@@ -186,7 +218,7 @@ export function suggestCategory(description, { history = [], categories = [], li
   const allowed = cats.length ? new Set(cats.map((c) => c.id)) : null;
   const order = new Map(cats.map((c, i) => [c.id, i]));
 
-  const { post, matching } = historyScores(features(tokenize(description)), history, allowed);
+  const { post, matching } = historyScores(richTokens(description).filter(keepToken), history, allowed);
   const w = matching ? matching / (matching + 1.2) : 0;
 
   const kwByName = keywordScores(description);

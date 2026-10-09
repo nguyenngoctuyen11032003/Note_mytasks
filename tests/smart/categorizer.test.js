@@ -191,3 +191,51 @@ describe('history (naive Bayes)', () => {
     expect(a).toEqual(b);
   });
 });
+
+describe('accent-aware keyword matching (M7)', () => {
+  it.each([
+    ['bỉm cho bé', 'move'],
+    ['đồ chơi cho bé', 'move'],
+    ['xem biểu diễn', 'home'],
+    ['bìa hồ sơ', 'food'],
+    ['xem bói', 'health'],
+    ['đồ dùng cá nhân', 'food'],
+    ['kem che nắng', 'food'],
+    ['dọn dẹp sạch sẽ', 'edu'],
+    ['nước dừa', 'home'],
+    ['nước mắm', 'home'],
+  ])('"%s" is not %s', (desc, wrong) => {
+    expect(top(desc)?.category_id).not.toBe(wrong);
+  });
+
+  it.each([
+    ['nước dừa', 'food'],
+    ['nước mắm', 'food'],
+    ['tiền nước', 'home'],
+    ['hóa đơn nước', 'home'],
+    ['hoá đơn nước', 'home'], // old-style tone placement
+    ['bỉm cho bé', 'shop'],
+    ['đồ chơi cho bé', 'shop'],
+    ['đi be', 'move'],
+    ['be bike', 'move'],
+    ['grab về nhà', 'move'],
+    ['ca phe', 'food'],
+    ['tien dien', 'home'],
+    ['bia hơi', 'food'],
+    ['cá kho', 'food'],
+  ])('"%s" → %s', (desc, id) => {
+    expect(top(desc)?.category_id).toBe(id);
+  });
+
+  it('history: accented tokens must agree on accents (unaccented history still matches)', () => {
+    const history = [
+      { description: 'bể bơi', category_id: 'health' },
+      { description: 'bể bơi tháng', category_id: 'health' },
+      { description: 'bể bơi hè', category_id: 'health' },
+    ];
+    const r = suggestCategory('bé', { categories, history });
+    expect(r.map((x) => x.category_id)).not.toContain('health');
+    const loose = suggestCategory('bé', { categories, history: [{ description: 'be', category_id: 'shop' }] });
+    expect(loose[0]?.category_id).toBe('shop');
+  });
+});

@@ -2,7 +2,10 @@
 function cell(v) {
   if (v == null) return '';
   if (Array.isArray(v)) v = v.join('; ');
-  const s = String(v);
+  let s = String(v);
+  // Formula injection guard: text starting with = + - @ (or a tab/CR) would be
+  // evaluated by Excel / Sheets. Plain numbers such as "-12.5" are left alone.
+  if (typeof v !== 'number' && /^[=+\-@\t\r]/.test(s) && !/^[-+]?\d+(\.\d+)?$/.test(s)) s = `'${s}`;
   return /[",\n\r;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

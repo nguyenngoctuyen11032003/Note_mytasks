@@ -13,13 +13,16 @@ import { toast } from '../components/toast.js';
 import * as store from '../core/store.js';
 import { setQuery } from '../core/router.js';
 import { onDataChanged } from '../core/events.js';
+import { onThemeChange } from '../components/theme.js';
 import { debounce } from '../utils/debounce.js';
 import { toCSV, downloadText } from '../utils/csv.js';
 import {
   listExpenses, createExpense, updateExpense, deleteExpense, summary, anomalies as fetchAnomalies,
-  suggestCategory as suggestRemote, listRecent, PAYMENT_METHODS,
+  suggestCategory as suggestRemote, listRecent, getExpensesByIds, PAYMENT_METHODS,
 } from '../services/expenses.js';
-import { listBudgets, resolveBudgets, setBudget, status as budgetStatus } from '../services/budgets.js';
+import {
+  listBudgets, resolveBudgets, setBudget, status as budgetStatus, budgetState, oneOffThreshold, projectMonth, routineRate,
+} from '../services/budgets.js';
 import { parseExpenseEntry } from '../services/smart/expenseParser.js';
 import { suggestCategory as suggestLocal, rankCategories, topPaymentMethod } from '../services/smart/categorizer.js';
 import { today, addDays, addMonths, startOfMonth, endOfMonth, startOfWeek, endOfWeek, daysBetween, diffDays, weekday, getWeekStart } from '../utils/date.js';
@@ -27,6 +30,7 @@ import { money, moneyShort, monthLabel, relDay, day, pct, parseMoney, num, dec }
 
 const PERIODS = { day: 'Ngày', week: 'Tuần', month: 'Tháng', year: 'Năm', custom: 'Tùy chọn' };
 const PREV_LABEL = { day: 'hôm trước', week: 'tuần trước', month: 'tháng trước', year: 'năm trước', custom: 'kỳ trước' };
+const IN_PERIOD = { day: 'trong ngày', week: 'trong tuần', month: 'trong tháng', year: 'trong năm', custom: 'trong kỳ' };
 const WD_FULL = ['Chủ nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
 const WD_SHORT = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
 const PM_ICON = { cash: 'coin', bank: 'refresh', credit_card: 'wallet', e_wallet: 'monitor', other: 'more' };
@@ -74,9 +78,7 @@ export default async function expensesPage(root, { query }) {
 
   mount(root, html`
     ${pageHead({
-      num: '06',
-      kicker: 'Chi tiêu',
-      title: 'Sổ <em>thu chi</em> hằng ngày',
+      title: 'Sổ thu chi',
       lede: 'Ghi mỗi khoản chi trong vài giây, rồi xem lại theo ngày, tuần, tháng hay năm — biết tiền đi đâu, còn bao nhiêu và tháng này sẽ kết thúc thế nào.',
       actions: html`<button class="btn" data-act="budget">${icon('piggy')} Ngân sách</button><button class="btn btn--primary" data-act="new">${icon('plus')} Khoản chi mới</button>`,
     })}
@@ -99,7 +101,7 @@ export default async function expensesPage(root, { query }) {
       <article class="sheet span-3" data-c5>${sheetHead('E.5', 'Thanh toán')}${loadingRows(4)}</article>
     </section>
     <h2 class="section-title">Ngân sách &amp; cảnh báo</h2>
-    <section class="grid grid-12">
+    <section class="grid grid-12 xp-bud-row">
       <article class="sheet span-7" data-budget>${sheetHead('E.6', 'Ngân sách')}${loadingRows(5)}</article>
       <article class="sheet span-5" data-anom>${sheetHead('E.7', 'Khoản chi bất thường')}${loadingRows(4)}</article>
     </section>
@@ -107,12 +109,11 @@ export default async function expensesPage(root, { query }) {
     <div class="toolbar xp-filters">
       <div class="input-group">${icon('search')}<input class="input" type="search" placeholder="Tìm mô tả, ghi chú…" value="${f.q}" data-f="q" aria-label="Tìm khoản chi" /></div>
       <select class="select" data-f="cat" aria-label="Lọc danh mục">${categoryOptions('expense', { all: 'Mọi danh mục', none: 'Chưa phân loại' }).map((o) => html`<option value="${o.value}" ${o.value === f.cat ? raw('selected') : ''}>${o.label}</option>`)}</select>
-      <select class="select" data-f="pm" aria-label="Lọc phương thức"><option value="">Mọi phương thức</option>${Object.entries(PAYMENT_METHODS).map(([v, l]) => html`<option value="${v}" ${v === f.pm ? raw('selected') : ''}>${l}</option>`)}</select>
+      <select class="select" data-f="pm" aria-label="Lọc phương thức"><option value="">Mọi hình thức</option>${Object.entries(PAYMENT_METHODS).map(([v, l]) => html`<option value="${v}" ${v === f.pm ? raw('selected') : ''}>${l}</option>`)}</select>
       <span class="toolbar__spacer"></span>
       <button class="btn" data-act="csv">${icon('download')} Xuất CSV</button>
     </div>
-    <article class="sheet" data-list>${loadingRows(6)}</article>
-    <button type="button" class="xp-fab" data-act="new" aria-label="Ghi khoản chi mới">${icon('plus')}</button>`);
+    <article class="sheet" data-list>${loadingRows(6)}</article>`);
 
   const $ = (s) => root.querySelector(s);
   const cats = () => store.categoriesOf('expense');
@@ -153,11 +154,37 @@ export default async function expensesPage(root, { query }) {
     const catSum = [...byCategory.values()].reduce((a, b) => a + b, 0);
     return overall ?? (catSum || null);
   }
+  /**
+   * Month-end forecast for month `m` (optionally one category): recorded spend +
+   * routine daily rate × days left. One-off big items (rent, transfers) count
+   * once instead of being extrapolated — budget_status's plain linear
+   * projection turns a 6,5 tr rent on the 5th into a 40 tr month.
+   */
+  function forecast(m, catId) {
+    const mine = (x) => catId === undefined || (x.category_id || null) === catId;
+    const threshold = oneOffThreshold(learn);
+    const baseRate = routineRate(learn.filter(mine), { month: m, threshold });
+    return projectMonth(live().filter(mine), { month: m, today: t0, threshold, baseRate: baseRate ?? null });
+  }
+  /** budget_status rows with the forecast (and the status it drives) recomputed for the running month. */
+  function refinedStatus() {
+    if (!statusRows || budgetMonth(range()) !== startOfMonth(t0)) return statusRows;
+    const bm = startOfMonth(t0);
+    return statusRows.map((x) => {
+      if (x.budget == null) return x;
+      // Overall row (category_id null) → every expense; category rows → that category.
+      const projected = forecast(bm, x.category_id ? x.category_id : undefined);
+      return { ...x, projected, status: budgetState(x.budget, x.spent, projected) };
+    });
+  }
   function periodTitle(r) {
     if (period === 'day') return day(date, 'long');
-    if (period === 'week') return `${day(r.from, 'short')} – ${day(r.to, 'medium')}`;
     if (period === 'month') return monthLabel(r.from);
     if (period === 'year') return `Năm ${r.from.slice(0, 4)}`;
+    if (r.from === r.to) return day(r.from, 'medium');
+    // Same month → "5 – 11 thg 10, 2026"; same year → "28 thg 9 – 4 thg 10, 2026".
+    if (r.from.slice(0, 7) === r.to.slice(0, 7)) return `${Number(r.from.slice(8))} – ${day(r.to, 'medium')}`;
+    if (r.from.slice(0, 4) === r.to.slice(0, 4)) return `${day(r.from, 'short')} – ${day(r.to, 'medium')}`;
     return `${day(r.from, 'medium')} – ${day(r.to, 'medium')}`;
   }
   function periodKicker(r) {
@@ -325,7 +352,8 @@ export default async function expensesPage(root, { query }) {
     const list = all.filter((x) => inRange(x, r.from, r.to));
     const total = sum(list);
     const prev = period === 'year' ? prevYearTotal : sum(all.filter((x) => inRange(x, pr.from, cmpTo)));
-    const change = prev ? ((total - prev) / prev) * 100 : null;
+    const future = r.from > t0;
+    const change = prev && !future ? ((total - prev) / prev) * 100 : null;
     const running = isCurrent(r);
     const elapsed = r.from > t0 ? 0 : running ? diffDays(t0, r.from) + 1 : lenOf(r);
     const avg = elapsed ? total / elapsed : 0;
@@ -338,19 +366,19 @@ export default async function expensesPage(root, { query }) {
     const mDays = daysIn(bm);
     const mCurrent = bm === startOfMonth(t0);
     const mElapsed = bm > t0 ? 0 : mCurrent ? diffDays(t0, bm) + 1 : mDays;
-    const projected = mCurrent ? (mElapsed ? (mSpent / mElapsed) * mDays : 0) : bm > t0 ? 0 : mSpent;
+    const projected = forecast(bm);
     const remaining = mBudget != null ? mBudget - mSpent : null;
     const daysLeft = mCurrent ? mDays - mElapsed + 1 : 0;
     const usedPct = mBudget ? (mSpent / mBudget) * 100 : 0;
     const mShort = `T${Number(bm.slice(5, 7))}/${bm.slice(0, 4)}`;
 
     const deltaTpl = change == null
-      ? html`<span>${prev === 0 && total > 0 ? `${PREV_LABEL[period]} chưa chi gì` : `${num(list.length)} khoản chi`}</span>`
-      : html`<span class="delta ${change > 0 ? 'delta--down' : 'delta--up'}">${change > 0 ? '▲' : '▼'} ${pct(Math.abs(change))}</span><span>so với ${running ? 'cùng kỳ ' : ''}${PREV_LABEL[period]}</span>`;
+      ? html`<span>${future ? (list.length ? `${num(list.length)} khoản đã lên lịch` : 'Kỳ này chưa bắt đầu') : prev === 0 && total > 0 ? `${PREV_LABEL[period].replace(/^./, (c) => c.toUpperCase())} chưa chi gì` : `${num(list.length)} khoản chi`}</span>`
+      : html`<span class="delta ${change > 0 ? 'delta--down' : 'delta--up'}">${change > 0 ? '▲' : '▼'} ${pct(Math.abs(change))}</span><span>so với ${running && period !== 'day' ? 'cùng kỳ ' : ''}${PREV_LABEL[period]}</span>`;
 
     mount($('[data-stats]'), html`
       <div class="stat stat--accent">
-        <div class="stat__label"><span class="eyebrow">Tổng chi · ${PERIODS[period].toLowerCase()}</span><span class="stat__icon">${icon('wallet')}</span></div>
+        <div class="stat__label"><span class="eyebrow">Tổng chi ${IN_PERIOD[period]}</span><span class="stat__icon">${icon('wallet')}</span></div>
         <div class="stat__value xp-stat__v">${money(total)}</div>
         <div class="stat__meta">${deltaTpl}</div>
       </div>
@@ -361,28 +389,28 @@ export default async function expensesPage(root, { query }) {
             <div class="stat__meta">${biggest ? html`<span>Lớn nhất ${moneyShort(biggest.amount)} · ${biggest.description || catName(biggest.category_id)}</span>` : html`<span>Chưa có khoản nào</span>`}</div>
           </div>`
         : html`<div class="stat">
-            <div class="stat__label"><span class="eyebrow">Trung bình / ngày</span><span class="stat__icon">${icon('activity')}</span></div>
+            <div class="stat__label"><span class="eyebrow">TB mỗi ngày</span><span class="stat__icon">${icon('activity')}</span></div>
             <div class="stat__value xp-stat__v">${money(avg)}</div>
             <div class="stat__meta"><span>${num(list.length)} khoản · ${num(elapsed)} ngày${running ? ' đã qua' : ''}</span></div>
           </div>`}
       <div class="stat">
-        <div class="stat__label"><span class="eyebrow">Ngân sách còn · ${mShort}</span><span class="stat__icon">${icon('piggy')}</span></div>
+        <div class="stat__label"><span class="eyebrow" title="Ngân sách ${mShort}">Ngân sách còn</span><span class="stat__icon">${icon('piggy')}</span></div>
         ${mBudget != null
           ? html`<div class="stat__value xp-stat__v ${remaining < 0 ? 'danger-text' : ''}">${money(remaining)}</div>
             <div class="stat__meta xp-stat__meta-col">
               ${meter(usedPct, { over: remaining < 0, warn: usedPct >= 80, proj: mCurrent && mBudget ? (projected / mBudget) * 100 : null })}
-              <span>${remaining < 0 ? html`<span class="danger-text">Vượt ${money(-remaining)}</span>` : mCurrent && daysLeft > 0 ? `≈ ${money(remaining / daysLeft)} / ngày cho ${daysLeft} ngày còn lại` : `${pct(usedPct)} đã dùng`}</span>
+              <span>${remaining < 0 ? html`<span class="danger-text">Vượt ${money(-remaining)} · ${mShort}</span>` : mCurrent && daysLeft > 0 ? `≈ ${moneyShort(remaining / daysLeft)}/ngày · còn ${daysLeft} ngày` : `${pct(usedPct)} đã dùng · ${mShort}`}</span>
             </div>`
           : html`<div class="stat__value xp-stat__v faint">—</div><div class="stat__meta"><button type="button" class="btn btn--sm" data-act="budget">${icon('plus')} Đặt ngân sách</button></div>`}
       </div>
       <div class="stat">
-        <div class="stat__label"><span class="eyebrow">${mCurrent ? 'Dự báo cuối tháng' : bm > t0 ? 'Tháng sắp tới' : `Chi cả ${mShort}`}</span><span class="stat__icon">${icon('trend')}</span></div>
+        <div class="stat__label"><span class="eyebrow">${mCurrent ? 'Dự báo cuối tháng' : bm > t0 ? `Dự báo ${mShort}` : `Chi cả ${mShort}`}</span><span class="stat__icon">${icon('trend')}</span></div>
         <div class="stat__value xp-stat__v">${money(projected)}</div>
         <div class="stat__meta">${mBudget != null && bm <= t0
           ? projected > mBudget
             ? html`<span class="delta delta--down">vượt ${moneyShort(projected - mBudget)}</span><span>so với ngân sách</span>`
             : html`<span class="delta delta--up">dư ${moneyShort(mBudget - projected)}</span><span>so với ngân sách</span>`
-          : html`<span>${mCurrent ? `theo nhịp ${moneyShort(mElapsed ? mSpent / mElapsed : 0)}/ngày` : `${num(mRows.length)} khoản`}</span>`}</div>
+          : html`<span>${mCurrent && mDays > mElapsed ? `nhịp thường ngày ≈ ${moneyShort((projected - mSpent) / (mDays - mElapsed))}/ngày` : `${num(mRows.length)} khoản`}</span>`}</div>
       </div>`);
   }
 
@@ -558,11 +586,18 @@ export default async function expensesPage(root, { query }) {
       });
       budgetTotal = any ? accB : null;
       const ti = days.indexOf(t0);
-      if (ti >= 0) {
-        const rate = actual[ti] / (ti + 1);
-        proj = days.map((d, i) => (i < ti ? null : actual[ti] + rate * (i - ti)));
+      if (ti >= 0 && ti < days.length - 1) {
+        // Month view: glide to the month-end forecast (one-offs counted once).
+        // Custom range: routine daily rate of the range so far.
+        const threshold = oneOffThreshold(learn);
+        const endVal = period === 'custom'
+          ? sum(all.filter((x) => inRange(x, span.from, span.to))) +
+            (sum(all.filter((x) => inRange(x, span.from, t0) && Number(x.amount) < threshold)) / (ti + 1)) * (days.length - 1 - ti)
+          : forecast(span.from);
+        const n = days.length - 1 - ti;
+        proj = days.map((d, i) => (i < ti ? null : actual[ti] + ((endVal - actual[ti]) * (i - ti)) / n));
       }
-      heading = period === 'custom' ? 'Lũy kế trong kỳ' : `Lũy kế · ${monthLabel(span.from)}`;
+      heading = period === 'custom' ? 'Lũy kế trong kỳ' : `Lũy kế T${Number(span.from.slice(5, 7))}/${span.from.slice(0, 4)}`;
     }
     const lastIdx = actual.reduce((k, v, i) => (v != null ? i : k), -1);
     const now = lastIdx >= 0 ? actual[lastIdx] : 0;
@@ -573,7 +608,11 @@ export default async function expensesPage(root, { query }) {
     else if (paceNow) {
       const d = ((now - paceNow) / paceNow) * 100;
       insight = d > 3
-        ? html`Đang chi <strong class="danger-text">nhanh hơn ${pct(d)}</strong> so với nhịp ngân sách${budgetTotal && end > budgetTotal ? html` — dự báo vượt <strong class="num">${moneyShort(end - budgetTotal)}</strong>` : ''}.`
+        ? html`Đang chi <strong class="danger-text">nhanh hơn ${pct(d)}</strong> so với nhịp ngân sách${budgetTotal && proj.length
+          ? end > budgetTotal
+            ? html` — dự báo vượt <strong class="num">${moneyShort(end - budgetTotal)}</strong>`
+            : html`, nhưng dự báo cuối kỳ vẫn dư <strong class="num">${moneyShort(budgetTotal - end)}</strong>`
+          : ''}.`
         : d < -3
           ? html`Đang chi <strong class="success-text">chậm hơn ${pct(-d)}</strong> so với nhịp ngân sách — tốt lắm.`
           : html`Đang bám sát nhịp ngân sách.`;
@@ -633,7 +672,7 @@ export default async function expensesPage(root, { query }) {
       <div class="sheet__body">
         <p class="xp-callout">Bạn chi nhiều nhất vào <strong>${WD_FULL[top]}</strong></p>
         <div class="chart-box chart-box--sm" data-c></div>
-        <p class="xp-insight">Trung bình <span class="num">${money(maxV)}</span>/ngày${minV > 0 && maxV / minV >= 1.2 ? html`, gấp <strong>${dec(Math.round((maxV / minV) * 10) / 10)}×</strong> ngày chi ít nhất` : ''}. ${weekdays > 0 && weekend > 0
+        <p class="xp-insight">Trung bình <span class="num">${money(maxV)}</span>/ngày${minV > 0 && maxV / minV >= 1.2 && maxV / minV < 10 ? html`, gấp <strong>${dec(Math.round((maxV / minV) * 10) / 10)}×</strong> ngày chi ít nhất` : ''}. ${weekdays > 0 && weekend > 0
           ? weekend > weekdays ? html`Cuối tuần chi nhiều hơn ngày thường <strong>${pct(((weekend - weekdays) / weekdays) * 100)}</strong>.` : html`Ngày thường chi nhiều hơn cuối tuần.`
           : ''}</p>
       </div>`);
@@ -673,8 +712,9 @@ export default async function expensesPage(root, { query }) {
   /* ================= E.6 budgets ================= */
   function renderBudget() {
     const bm = budgetMonth(range());
-    const head = sheetHead('E.6', `Ngân sách · ${monthLabel(bm)}`, html`<button type="button" class="btn btn--ghost btn--sm" data-act="budget">${icon('edit')} Điều chỉnh</button>`);
+    const head = sheetHead('E.6', `Ngân sách T${Number(bm.slice(5, 7))}/${bm.slice(0, 4)}`, html`<button type="button" class="btn btn--ghost btn--sm" data-act="budget">${icon('edit')} Điều chỉnh</button>`);
     if (statusErr) { mount($('[data-budget]'), html`${head}<div class="sheet__body">${errorState(statusErr)}</div>`); return; }
+    const statusRows = refinedStatus();
     if (!statusRows) { mount($('[data-budget]'), html`${head}${loadingRows(4)}`); return; }
     const overall = statusRows.find((x) => !x.category_id);
     const catRows = statusRows.filter((x) => x.category_id);
@@ -690,8 +730,8 @@ export default async function expensesPage(root, { query }) {
     const ovSpent = overall?.spent ?? catRows.reduce((s, x) => s + x.spent, 0);
     mount($('[data-budget]'), html`${head}
       <div class="sheet__body xp-budget">
-        ${over.length ? html`<div class="notice notice--danger">${icon('alert')}<div><strong>Đã vượt ngân sách:</strong> ${over.map((x, i) => html`${i ? ', ' : ''}${nm(x)} <span class="num">(+${moneyShort(x.spent - x.budget)})</span>`)}</div></div>` : ''}
-        ${warn.length ? html`<div class="notice notice--warning">${icon('info')}<div><strong>Cần chú ý:</strong> ${warn.map((x, i) => html`${i ? ', ' : ''}${nm(x)} <span class="num">(${x.projected > x.budget ? `dự báo ${moneyShort(x.projected)}` : pct(x.used_pct)} / ${moneyShort(x.budget)})</span>`)}</div></div>` : ''}
+        ${over.length ? html`<div class="notice notice--danger">${icon('alert')}<div><strong>Đã vượt ngân sách:</strong> ${over.slice(0, 3).map((x, i) => html`${i ? ', ' : ''}${nm(x)} <span class="num">(+${moneyShort(x.spent - x.budget)})</span>`)}${over.length > 3 ? ` và ${over.length - 3} mục khác` : ''}.</div></div>` : ''}
+        ${warn.length ? html`<div class="notice notice--warning">${icon('info')}<div><strong>Cần chú ý:</strong> ${warn.slice(0, 3).map((x, i) => html`${i ? ', ' : ''}${nm(x)} <span class="num">(${x.projected > x.budget ? `dự báo ${moneyShort(x.projected)}` : pct(x.used_pct)} / ${moneyShort(x.budget)})</span>`)}${warn.length > 3 ? ` và ${warn.length - 3} mục khác` : ''}.</div></div>` : ''}
         ${overall?.budget != null ? html`
           <div class="xp-budget__hero">
             <div class="row between xp-budget__hero-top">
@@ -709,7 +749,7 @@ export default async function expensesPage(root, { query }) {
         </ul>` : ''}
         ${noB.length ? html`<div class="xp-budget__nob"><span class="eyebrow">Chưa đặt ngân sách</span>
           <div class="row-wrap">${noB.slice(0, 6).map((x) => html`<span class="xp-pill xp-pill--ghost" style="--c:${x.color || 'var(--ink-4)'}"><i class="xp-pill__dot"></i>${nm(x)} · <span class="num">${moneyShort(x.spent)}</span></span>`)}</div></div>` : ''}
-        <p class="faint xp-budget__legend"><i class="xp-meter__proj-key"></i> vạch đứng = dự báo cuối tháng theo nhịp hiện tại</p>
+        <p class="faint xp-budget__legend"><i class="xp-meter__proj-key"></i> vạch đứng = dự báo cuối tháng theo nhịp chi thường ngày</p>
       </div>`);
   }
   const statusBadge = (s) => html`<span class="badge badge--${(STATUS[s] || STATUS.no_budget)[1]}">${(STATUS[s] || STATUS.no_budget)[0]}</span>`;
@@ -752,12 +792,18 @@ export default async function expensesPage(root, { query }) {
     const r = range();
     const inPeriod = live().filter((x) => inRange(x, r.from, r.to));
     const list = filtered();
+    if (!list.length && focusId) { flashFocus(); return; }
     if (!inPeriod.length) {
       mount($('[data-list]'), html`${emptyState({ art: 'wallet', title: 'Chưa có khoản chi nào trong kỳ', text: 'Gõ vào ô ghi nhanh phía trên — ví dụ “cafe 45k” rồi nhấn Enter.', action: html`<button class="btn btn--primary" data-act="new">${icon('plus')} Ghi khoản chi</button>` })}`);
       return;
     }
     if (!list.length) {
-      mount($('[data-list]'), html`${emptyState({ art: 'wallet', small: true, title: 'Không có khoản chi phù hợp bộ lọc', action: html`<button class="btn btn--sm" data-act="clear">Xóa bộ lọc</button>` })}`);
+      const wide = f.q && !(period === 'custom' && lenOf(custom) >= 365);
+      mount($('[data-list]'), html`${emptyState({
+        art: 'wallet', small: true, title: 'Không có khoản chi phù hợp bộ lọc',
+        text: f.q ? `Không tìm thấy “${f.q}” trong ${periodTitle(r).toLowerCase()}.` : 'Thử bỏ bớt điều kiện lọc.',
+        action: html`<div class="row-wrap xp-empty-acts">${wide ? html`<button class="btn btn--sm btn--primary" data-act="search-wide">${icon('search')} Tìm trong 12 tháng qua</button>` : ''}<button class="btn btn--sm" data-act="clear">Xóa bộ lọc</button></div>`,
+      })}`);
       return;
     }
     const total = sum(list);
@@ -774,12 +820,35 @@ export default async function expensesPage(root, { query }) {
       ${list.length > shown.length ? html`<div class="xp-more"><button type="button" class="btn btn--sm" data-act="more">Xem thêm ${num(Math.min(LIST_STEP, list.length - shown.length))} khoản (còn ${num(list.length - shown.length)})</button></div>` : ''}
       <div class="sheet__foot"><span>${num(list.length)} khoản chi${filteredOn ? ' (đã lọc)' : ''}</span><strong class="num">${money(total)}</strong></div>`);
     if (editingId) root.querySelector('[data-inline] [name=amount]')?.focus();
-    if (focusId) {
-      const el = root.querySelector(`.xp-row[data-id="${CSS.escape(focusId)}"]`);
-      focusId = null;
-      setQuery({ focus: null });
-      if (el) { el.classList.add('is-flash'); el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+    if (focusId) flashFocus();
+  }
+
+  /** Bring the expense named by ?focus= into view — switching to its day when it lies outside the period. */
+  function flashFocus() {
+    const id = focusId;
+    focusId = null;
+    setQuery({ focus: null });
+    const el = root.querySelector(`.xp-row[data-id="${CSS.escape(id)}"]`);
+    if (el) { el.classList.add('is-flash'); el.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+    const r = range();
+    const known = rows.find((x) => x.id === id);
+    if (known && inRange(known, r.from, r.to)) {
+      // Hidden by a filter or by the "show more" cap → reveal it.
+      Object.assign(f, { q: '', cat: '', pm: '' });
+      root.querySelectorAll('[data-f]').forEach((i) => (i.value = ''));
+      persist();
+      listLimit = Math.max(listLimit, rows.length);
+      focusId = id;
+      renderCats(); renderPayment(); renderList();
+      return;
     }
+    if (known) { goTo({ period: 'day', date: known.spent_on, focus: id }); return; }
+    getExpensesByIds([id]).then(([x]) => {
+      if (!alive) return;
+      if (x) { goTo({ period: 'day', date: x.spent_on, focus: id }); return; }
+      toast.info('Khoản chi này không còn tồn tại.');
+      renderList();
+    }).catch(() => { if (alive) renderList(); });
   }
 
   function rowTpl(x) {
@@ -799,7 +868,7 @@ export default async function expensesPage(root, { query }) {
   function inlineTpl(x) {
     return html`<li class="xp-row is-editing" data-id="${x.id}">
       <form class="xp-inline" data-inline novalidate>
-        <label class="xp-inline__f xp-inline__f--amt"><span class="eyebrow">Số tiền</span><input class="input input--sm num" name="amount" value="${String(Math.round(x.amount))}" inputmode="decimal" autocomplete="off" required /></label>
+        <label class="xp-inline__f xp-inline__f--amt"><span class="eyebrow">Số tiền</span><input class="input input--sm num" name="amount" value="${num(Math.round(x.amount))}" inputmode="decimal" autocomplete="off" required /></label>
         <label class="xp-inline__f xp-inline__f--desc"><span class="eyebrow">Mô tả</span><input class="input input--sm" name="description" value="${x.description || ''}" maxlength="200" placeholder="Mô tả" /></label>
         <label class="xp-inline__f"><span class="eyebrow">Danh mục</span><select class="select select--sm" name="category_id">${categoryOptions('expense', { all: '— Chưa phân loại —' }).map((o) => html`<option value="${o.value}" ${o.value === (x.category_id || '') ? raw('selected') : ''}>${o.label}</option>`)}</select></label>
         <label class="xp-inline__f"><span class="eyebrow">Thanh toán</span><select class="select select--sm" name="payment_method">${Object.entries(PAYMENT_METHODS).map(([v, l]) => html`<option value="${v}" ${v === x.payment_method ? raw('selected') : ''}>${l}</option>`)}</select></label>
@@ -1020,13 +1089,13 @@ export default async function expensesPage(root, { query }) {
       body: html`
         <div class="notice" style="margin-bottom:var(--s-5)">${icon('info')}<div>Ngân sách <strong>áp dụng từ tháng này trở đi</strong> cho đến khi bạn thay đổi — các tháng trước giữ nguyên. Để trống hoặc 0 = không đặt.</div></div>
         <div class="form">
-          ${field({ label: 'Ngân sách tổng cho cả tháng', name: 'overall', hint: ' ', control: html`<div class="input-group"><input id="__ID__" class="input has-suffix num" name="overall" value="${overall ? String(Math.round(overall)) : ''}" inputmode="decimal" autocomplete="off" placeholder="Ví dụ: 8tr" /><span class="input-group__suffix">${currency()}</span></div>` })}
+          ${field({ label: 'Ngân sách tổng cho cả tháng', name: 'overall', hint: ' ', control: html`<div class="input-group"><input id="__ID__" class="input has-suffix num" name="overall" value="${overall ? num(Math.round(overall)) : ''}" inputmode="decimal" autocomplete="off" placeholder="Ví dụ: 8tr" /><span class="input-group__suffix">${currency()}</span></div>` })}
           <div class="budget-grid">
             ${cats().map((c) => html`
               <div class="budget-grid__row">
                 ${catLabel(c.id)}
                 <span class="faint num" style="font-size:var(--fs-xs)">đã chi ${moneyShort(spentBy.get(c.id) || 0)}</span>
-                <input class="input input--sm num" name="cat_${c.id}" value="${byCategory.get(c.id) ? String(Math.round(byCategory.get(c.id))) : ''}" inputmode="decimal" placeholder="—" aria-label="Ngân sách ${c.name}" />
+                <input class="input input--sm num" name="cat_${c.id}" value="${byCategory.get(c.id) ? num(Math.round(byCategory.get(c.id))) : ''}" inputmode="decimal" placeholder="—" aria-label="Ngân sách ${c.name}" />
               </div>`)}
           </div>
         </div>`,
@@ -1036,6 +1105,11 @@ export default async function expensesPage(root, { query }) {
         const hint = inp.closest('.field').querySelector('.field__hint');
         const upd = () => { const n = parseMoney(inp.value); hint.textContent = inp.value && Number.isFinite(n) ? `= ${money(n)}` : 'Gõ “k” cho nghìn, “tr” cho triệu'; };
         inp.addEventListener('input', upd); upd();
+        // "8tr" / "1500000" → "8.000.000" once the field is left, so amounts stay readable.
+        el.querySelectorAll('input[name=overall], input[name^=cat_]').forEach((i) => i.addEventListener('change', () => {
+          const n = parseMoney(i.value);
+          if (i.value && Number.isFinite(n) && n >= 0) { i.value = num(Math.round(n)); if (i === inp) upd(); }
+        }));
       },
       validate(v) {
         const e = {};
@@ -1151,6 +1225,7 @@ export default async function expensesPage(root, { query }) {
       return goTo({ date: t0 });
     }
     if (a === 'clear-cat') return setCatFilter(f.cat);
+    if (a === 'search-wide') { custom = { from: addDays(t0, -364), to: t0 }; return goTo({ period: 'custom' }); }
     if (a === 'clear') {
       Object.assign(f, { q: '', cat: '', pm: '' });
       root.querySelectorAll('[data-f]').forEach((i) => (i.value = ''));
@@ -1186,6 +1261,8 @@ export default async function expensesPage(root, { query }) {
   disposers.push(on(root, 'input', '[data-f="q"]', (e, el) => { f.q = el.value; onSearch(); }));
   disposers.push(on(root, 'change', 'select[data-f]', (e, el) => { f[el.dataset.f] = el.value; persist(); listLimit = LIST_STEP; renderCats(); renderPayment(); renderList(); }));
   disposers.push(onDataChanged(() => { if (alive) load({ full: true }); }));
+  // Chart colours are read from CSS tokens at draw time → redraw on a theme switch.
+  disposers.push(onThemeChange(() => { if (alive && loaded) requestAnimationFrame(() => { if (alive) renderData(); }); }));
   function persist() { setQuery({ q: f.q || null, cat: f.cat || null, pm: f.pm || null }); }
 
   // "/" focuses the quick-entry bar (when not typing elsewhere).

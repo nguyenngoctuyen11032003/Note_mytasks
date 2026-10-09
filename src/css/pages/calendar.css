@@ -11,7 +11,7 @@
 .calx-nav { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .calx-nav__btn { width: 40px; height: 40px; border: 1px solid var(--rule); }
 .calx-title {
-  font-family: var(--font-display); font-weight: 400; font-size: var(--fs-xl); letter-spacing: -0.01em;
+  font-family: var(--font-display); font-weight: 600; font-size: var(--fs-xl); letter-spacing: -0.01em;
   min-width: 13ch; text-align: center; padding: 0 var(--s-2); white-space: nowrap;
   font-variant-numeric: lining-nums tabular-nums;
 }
@@ -23,7 +23,9 @@
 @media (max-width: 720px) {
   .calx-bar { align-items: stretch; }
   .calx-nav { width: 100%; }
-  .calx-title { flex: 1; min-width: 0; font-size: var(--fs-lg); overflow: hidden; text-overflow: ellipsis; }
+  .calx-title { flex: 1; min-width: 0; font-size: var(--fs-md); overflow: hidden; text-overflow: ellipsis; padding: 0 var(--s-1); }
+  .calx-nav__btn { width: 36px; height: 36px; flex-shrink: 0; }
+  .calx-today { height: 36px; margin-left: var(--s-1); flex-shrink: 0; }
   .calx-bar__tools { width: 100%; }
   .calx-bar__tools .segmented { flex: 1 1 auto; }
   .calx-bar__tools .segmented button { flex: 1; justify-content: center; height: 36px; padding: 0 var(--s-2); }
@@ -54,7 +56,7 @@
 
 /* ---------- Month ---------- */
 .calx-dow { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border-bottom: 1px solid var(--rule); background: var(--surface-2); }
-.calx-dow span { padding: var(--s-2) var(--s-3); font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
+.calx-dow span { padding: var(--s-2) var(--s-3); font-family: var(--font-sans); font-size: var(--fs-2xs); font-weight: 500; color: var(--ink-3); }
 .calx-row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
 .calx-row + .calx-row { border-top: 1px solid var(--rule); }
 .calx-cell {
@@ -75,7 +77,7 @@
 .calx-cell:focus-visible { box-shadow: inset 0 0 0 2px var(--ink); border-radius: 0; }
 .calx-cell.is-drop { background: color-mix(in srgb, var(--accent-soft) 70%, transparent); outline: 1.5px dashed var(--accent); outline-offset: -4px; }
 .calx-cell__head { display: flex; align-items: center; gap: 6px; min-height: 26px; }
-.calx-num { font-family: var(--font-display); font-size: var(--fs-md); line-height: 1; font-variant-numeric: lining-nums tabular-nums; padding-left: 2px; }
+.calx-num { font-family: var(--font-sans); font-weight: 500; font-size: var(--fs-sm); line-height: 1; font-variant-numeric: lining-nums tabular-nums; padding-left: 2px; }
 .calx-cell.is-today .calx-num {
   display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0;
   border-radius: 50%; background: var(--accent); color: var(--accent-contrast); font-size: var(--fs-sm);
@@ -95,21 +97,21 @@
 .calx-chip:hover { color: var(--ink); background: color-mix(in srgb, var(--pc) 22%, var(--surface)); }
 .calx-chip.is-done, .calx-chip.is-cancelled { text-decoration: line-through; text-decoration-color: var(--ink-4); color: var(--ink-4); background: transparent; }
 .calx-chip.is-dragging, .calx-card.is-dragging { opacity: 0.4; }
-.calx-more { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); padding-left: 4px; }
+.calx-more { font-size: var(--fs-2xs); color: var(--ink-3); padding-left: 4px; }
 
 .calx-dots { display: none; gap: 3px; justify-content: center; }
 .calx-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--pc); }
 .calx-dots i.is-done { background: transparent; box-shadow: inset 0 0 0 1px var(--ink-4); }
 
 .calx-cell__foot { margin-top: auto; display: flex; justify-content: space-between; align-items: baseline; gap: 4px; min-height: 14px; }
-.calx-fig { font-family: var(--font-mono); font-size: 10px; letter-spacing: -0.01em; white-space: nowrap; }
+.calx-fig { font-family: var(--font-sans); font-size: var(--fs-2xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .calx-fig--time { color: var(--ink-3); }
-.calx-fig--money { color: var(--clay); margin-left: auto; }
-.calx-heat { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--indigo); opacity: var(--h); pointer-events: none; }
+.calx-fig--money { color: var(--ink-2); margin-left: auto; }
+.calx-heat { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--accent); opacity: calc(var(--h) * 0.8); pointer-events: none; }
 
 /* Compact month for phones: dots instead of chips */
 @media (max-width: 720px) {
-  .calx-dow span { padding: 6px 0; text-align: center; letter-spacing: 0.06em; }
+  .calx-dow span { padding: 6px 0; text-align: center; }
   .calx-cell { min-height: 58px; padding: 5px 2px 6px; align-items: center; gap: 3px; }
   .calx-cell__head { justify-content: center; min-height: 24px; }
   .calx-flag { position: absolute; top: 5px; right: 5px; margin: 0; width: 5px; height: 5px; }
@@ -118,7 +120,7 @@
   .calx-chips { display: none; }
   .calx-dots { display: flex; }
   .calx-cell__foot { flex-direction: column; align-items: center; gap: 0; }
-  .calx-fig { font-size: 9px; }
+  .calx-fig { font-size: 10px; }
   .calx-fig--money { margin-left: 0; }
 }
 
@@ -135,8 +137,8 @@
 .calx-wd:focus-visible { box-shadow: inset 0 0 0 2px var(--ink); border-radius: 0; }
 .calx-wd.is-drop { background: color-mix(in srgb, var(--accent-soft) 70%, transparent); outline: 1.5px dashed var(--accent); outline-offset: -4px; }
 .calx-wd__head { display: flex; align-items: baseline; gap: 6px; padding: 0 4px var(--s-2); border-bottom: 1px solid var(--rule); cursor: pointer; }
-.calx-wd__dow { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
-.calx-wd__num { font-family: var(--font-display); font-size: var(--fs-xl); line-height: 1; font-variant-numeric: lining-nums tabular-nums; }
+.calx-wd__dow { font-size: var(--fs-2xs); font-weight: 500; color: var(--ink-3); }
+.calx-wd__num { font-family: var(--font-display); font-weight: 600; font-size: var(--fs-xl); line-height: 1; font-variant-numeric: lining-nums tabular-nums; }
 .calx-wd.is-today .calx-wd__num { color: var(--accent); }
 .calx-wd.is-today .calx-wd__dow { color: var(--accent); }
 .calx-wd__head .calx-fig--money { margin-left: auto; }
@@ -152,7 +154,7 @@
 .calx-card[draggable='true'] { cursor: grab; }
 .calx-card:hover { box-shadow: var(--shadow-2); border-color: var(--rule-strong); border-left-color: var(--pc); }
 .calx-card__title { font-size: var(--fs-xs); font-weight: 500; line-height: 1.3; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.calx-card__meta { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.calx-card__meta { font-size: var(--fs-2xs); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .calx-card.is-done .calx-card__title, .calx-card.is-cancelled .calx-card__title { text-decoration: line-through; text-decoration-color: var(--ink-4); color: var(--ink-3); }
 .calx-card.is-done, .calx-card.is-cancelled { background: transparent; border-left-color: var(--rule-strong); }
 .calx-add {
@@ -186,7 +188,7 @@
     var(--paper-2);
   overflow: hidden;
 }
-.calx-track i { position: absolute; top: 0; bottom: 0; background: var(--indigo); opacity: 0.75; border-radius: 1px; }
+.calx-track i { position: absolute; top: 0; bottom: 0; background: var(--accent); opacity: 0.6; border-radius: 1px; }
 .calx-track i.is-live { background: var(--accent); opacity: 1; }
 
 /* ---------- Agenda ---------- */
@@ -212,16 +214,22 @@
 .calx-day { position: sticky; top: calc(var(--topbar-h) + var(--s-4)); max-height: calc(100dvh - var(--topbar-h) - 32px); overflow-y: auto; }
 @media (max-width: 1180px) { .calx-day { position: static; max-height: none; } }
 .calx-day__head { padding: var(--s-5); border-bottom: 1px solid var(--rule); }
-.calx-day__head .eyebrow { color: var(--accent); }
-.calx-day__head h3 { font-size: var(--fs-xl); font-weight: 400; margin: 4px 0 var(--s-4); }
+.calx-day__kicker { font-size: var(--fs-xs); font-weight: 600; color: var(--accent-ink); }
+.calx-day__head h3 { font-family: var(--font-display); font-size: var(--fs-xl); font-weight: 600; letter-spacing: -0.01em; margin: 4px 0 var(--s-4); }
 .calx-day__sum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s-3); margin: 0 0 var(--s-4); }
-.calx-day__sum dt { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
-.calx-day__sum dd { margin: 2px 0 0; font-family: var(--font-display); font-size: var(--fs-lg); font-variant-numeric: lining-nums tabular-nums; }
+.calx-day__sum dt { font-size: var(--fs-2xs); font-weight: 500; color: var(--ink-3); }
+.calx-day__sum dd { margin: 2px 0 0; font-family: var(--font-display); font-weight: 600; font-size: var(--fs-lg); font-variant-numeric: lining-nums tabular-nums; }
 .calx-day__sum dd small { font-family: var(--font-sans); font-size: var(--fs-2xs); color: var(--ink-3); }
 .calx-day__add { height: 42px; }
-.calx-day__sect { padding: var(--s-4) var(--s-5); border-bottom: 1px solid var(--rule); display: grid; gap: var(--s-2); }
+.calx-day__sect { padding: var(--s-4) var(--s-5); border-bottom: 1px solid var(--rule); display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-2); min-width: 0; }
+.calx-day .mini-list li > .grow { min-width: 0; }
+.calx-day .mini-list li > .num { flex-shrink: 0; white-space: nowrap; }
 .calx-day__sect:last-child { border-bottom: 0; }
 .calx-day__sect .list { margin: 0 calc(var(--s-5) * -1); }
+.calx-day__label { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-2); font-size: var(--fs-xs); font-weight: 600; color: var(--ink-2); }
+.calx-day__label a { font-weight: 500; color: var(--ink-3); text-decoration: none; }
+.calx-day__label a:hover, .calx-day__label a:focus-visible { color: var(--accent-ink); text-decoration: underline; }
+.calx-day__total { display: flex; justify-content: space-between; padding-top: var(--s-2); border-top: 1px solid var(--rule); font-size: var(--fs-sm); font-weight: 600; }
 .calx-day__none { color: var(--ink-3); font-size: var(--fs-sm); padding: var(--s-1) 0; }
 .calx-task .tick { position: relative; }
 .calx-task .tick::after { content: ''; position: absolute; inset: -9px; }

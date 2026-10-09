@@ -10,6 +10,25 @@ const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;
 export const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ESC[c]);
 export const raw = (s) => new SafeHTML(String(s ?? ''));
 
+/**
+ * URL that is safe to put in href/src: http(s), mailto, tel, or a relative /
+ * hash / query URL. Anything with another scheme (javascript:, data:, vbscript:,
+ * file:, …) becomes `fallback`. Control characters and whitespace that browsers
+ * strip before parsing the scheme ("java\tscript:") are taken into account.
+ */
+export function safeUrl(u, fallback = '#') {
+  const s = String(u ?? '').trim();
+  if (!s) return fallback;
+  // eslint-disable-next-line no-control-regex
+  const probe = s.replace(/[\u0000- \u007f-\u009f]/g, '');
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(probe);
+  if (!scheme) return s; // relative: '#/tasks', '/x', '?q=1', 'page.html'
+  return /^(https?|mailto|tel)$/i.test(scheme[1]) ? s : fallback;
+}
+
+// Attribute whose value is a URL: interpolations there go through safeUrl().
+const URL_ATTR = /\s(?:href|src|action|formaction|xlink:href|poster|cite|background)\s*=\s*["']$/i;
+
 function render(v) {
   if (v == null || v === false || v === true) return '';
   if (Array.isArray(v)) return v.map(render).join('');
@@ -25,7 +44,10 @@ export function html(strings, ...values) {
     const v = values[i];
     // Inside an attribute value (aria-pressed="${bool}") booleans print as text;
     // in content position they render nothing (so `${cond && html`…`}` works).
-    out += typeof v === 'boolean' && str.endsWith('="') ? String(v) : render(v);
+    if (typeof v === 'boolean' && str.endsWith('="')) out += String(v);
+    // href="${x}" / src="${x}": a full URL is interpolated → block script schemes.
+    else if (v != null && !(v instanceof SafeHTML) && !Array.isArray(v) && URL_ATTR.test(str)) out += esc(safeUrl(v));
+    else out += render(v);
   });
   return new SafeHTML(out);
 }

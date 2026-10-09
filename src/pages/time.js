@@ -1,4 +1,4 @@
-// § 04 Thời gian — focus timer (stopwatch + Pomodoro), focus mode, manual
+// Thời gian — focus timer (stopwatch + Pomodoro), focus mode, manual
 // entries, week timeline and time analytics. All timer state transitions go
 // through components/timer.js so the topbar chip and other pages stay in sync.
 import { html, mount, on, raw, fragment } from '../utils/dom.js';
@@ -13,6 +13,7 @@ import * as store from '../core/store.js';
 import { categoryById } from '../core/store.js';
 import { setQuery } from '../core/router.js';
 import { onDataChanged } from '../core/events.js';
+import { onThemeChange } from '../components/theme.js';
 import { listTasks } from '../services/tasks.js';
 import { listEntries, entrySeconds, logTime, updateEntry, deleteEntry } from '../services/timer.js';
 import {
@@ -20,17 +21,25 @@ import {
   toLocalInput, fromLocalInput, weekdayLabels,
 } from '../utils/date.js';
 import { clock, minutes, hours, day, time, relDay, dec, monthLabel, num } from '../utils/format.js';
+import { toCSV, downloadText } from '../utils/csv.js';
 
 const OPEN = ['todo', 'in_progress'];
 const fold = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase();
 const fc = timer.formatCountdown;
+/** Entry duration; sub-minute segments read "< 1p" instead of a misleading "0p". */
+/** Entry seconds; a running entry counts up to server-now (the device clock may lag). */
+const secsOf = (e) => entrySeconds(e, timer.serverNow());
+const durLabel = (secs) => (secs > 0 && secs < 60 ? '< 1p' : minutes(secs / 60));
 
 export default async function timePage(root, { query }) {
   let period = query.period === 'month' ? 'month' : 'week';
   let offset = Math.min(0, Math.trunc(Number(query.offset) || 0));
   let tasks = [];
   let entries = [];      // selected period
-  let weekEntries = [];  // this week (stats)
+  let statEntries = [];  // from min(week start, month start) to today (stats)
+  let lastStatsAt = 0;
+  let logLimit = 40;
+  let loaded = false;
   let charts = [];
   let pickTaskId = query.task || '';
   let pickDesc = '';
@@ -43,9 +52,8 @@ export default async function timePage(root, { query }) {
 
   mount(root, html`
     ${pageHead({
-      num: '04',
       kicker: 'Thời gian',
-      title: 'Đo đếm từng <em>khoảnh khắc</em>',
+      title: 'Đo đếm từng khoảnh khắc',
       lede: 'Bấm giờ hoặc làm theo nhịp Pomodoro. Mỗi phiên được cộng dồn vào công việc — dữ liệu thật để lập kế hoạch sát hơn.',
       actions: html`
         <button class="btn" data-act="focus">${icon('expand')} Chế độ tập trung</button>
@@ -55,7 +63,7 @@ export default async function timePage(root, { query }) {
     <section class="tm-stats" data-stats>${statTileSkeleton(4)}</section>
 
     <div class="tm-period">
-      <h2 class="section-title tm-period__title">Nhật ký <em>thời gian</em></h2>
+      <h2 class="section-title tm-period__title">Nhật ký thời gian</h2>
       <div class="tm-period__ctrl">
         <div class="segmented" role="group" aria-label="Kỳ xem">
           <button type="button" data-period="week" aria-pressed="${period === 'week'}">Tuần</button>
@@ -189,7 +197,8 @@ export default async function timePage(root, { query }) {
     const t = id ? taskById(id) : null;
     const title = (v.run ? v.run.task?.title : null) || t?.title || v.paused?.title || '';
     const desc = v.run ? v.run.description : v.paused?.description;
-    return { title: title || desc || 'Phiên không gắn công việc', desc: title && desc ? desc : '', task: t || v.run?.task || null };
+    // A paused session without a task stores its note as `title` too: don't print it twice.
+    return { title: title || desc || 'Phiên không gắn công việc', desc: title && desc && desc !== title ? desc : '', task: t || v.run?.task || null };
   }
 
   function controls(v, { big = false } = {}) {
@@ -281,15 +290,40 @@ export default async function timePage(root, { query }) {
     return html`<span class="num faint">${minutes(full.actual_minutes || 0)}${full.estimated_minutes ? ` / ${minutes(full.estimated_minutes)} ước tính` : ''}</span>`;
   }
 
+  // The hero holds live form controls (task combobox, session note). A data
+  // reload forces a refresh (lastKey = ''), but re-rendering while the user is
+  // in that form would replace the focused input and close the open list. So
+  // when only data changed, defer the hero until focus leaves the form.
+  let renderedKey = '';
+  let heroStale = false;
+  const heroFormActive = () => {
+    const a = document.activeElement;
+    const form = root.querySelector('.tm-hero__form');
+    return Boolean(a && form && form.contains(a));
+  };
+
   function refresh() {
     const v = view();
     const key = `${v.state}|${v.mode}|${v.pm.cycle}|${v.pm.todayCount}|${v.run?.id || ''}`;
     if (key !== lastKey) {
       lastKey = key;
-      renderHero(v);
+      if (key === renderedKey && heroFormActive()) {
+        heroStale = true;
+      } else {
+        renderedKey = key;
+        heroStale = false;
+        renderHero(v);
+      }
       renderFocus(v);
     }
     paint(v);
+    // Keep the totals moving while a timer runs (cheap: local data only).
+    if (loaded && v.run && Date.now() - lastStatsAt > 30000) {
+      renderStats();
+      const dur = root.querySelector('.tm-entry.is-running .tm-entry__dur');
+      const e = entries.find((x) => !x.ended_at);
+      if (dur && e) dur.textContent = durLabel(secsOf(e));
+    }
   }
 
   /* ================================================================ */
@@ -523,11 +557,16 @@ export default async function timePage(root, { query }) {
   /* Stats                                                              */
   /* ================================================================ */
   function renderStats() {
-    const t0 = today(), ws = startOfWeek(t0);
+    lastStatsAt = Date.now();
+    const t0 = today(), ws = startOfWeek(t0), ms = startOfMonth(t0);
     const sumDay = (list, pred) => list.reduce((s, e) => s + pieces(e).filter((p) => pred(p.day)).reduce((a, p) => a + (p.e - p.s) / 1000, 0), 0);
-    const todaySecs = sumDay(weekEntries, (d) => d === t0);
-    const weekSecs = sumDay(weekEntries, (d) => d >= ws && d <= t0);
+    const todaySecs = sumDay(statEntries, (d) => d === t0);
+    const weekSecs = sumDay(statEntries, (d) => d >= ws && d <= t0);
+    const monthSecs = sumDay(statEntries, (d) => d >= ms && d <= t0);
     const elapsedDays = daysBetween(ws, t0).length;
+    const monthDays = daysBetween(ms, t0).length;
+    const monthActive = new Set(statEntries.flatMap((e) => pieces(e).map((p) => p.day)).filter((d) => d >= ms && d <= t0)).size;
+    const todayCount = statEntries.filter((e) => dayOf(e.started_at) === t0).length;
     const pm = timer.pomodoro();
     const est = tasks.filter((t) => t.status === 'completed' && t.estimated_minutes > 0 && t.actual_minutes > 0);
     const acc = est.length ? est.reduce((s, t) => s + t.actual_minutes, 0) / est.reduce((s, t) => s + t.estimated_minutes, 0) : null;
@@ -535,7 +574,7 @@ export default async function timePage(root, { query }) {
       <div class="stat stat--accent">
         <div class="stat__label"><span class="eyebrow">Hôm nay</span><span class="stat__icon">${icon('clock')}</span></div>
         <div class="stat__value">${hoursMins(todaySecs)}</div>
-        <div class="stat__meta">${num(weekEntries.filter((e) => dayOf(e.started_at) === t0).length)} phiên</div>
+        <div class="stat__meta">${num(todayCount)} phiên${pm.todayCount ? ` · ${num(pm.todayCount)} pomodoro` : ''}</div>
       </div>
       <div class="stat">
         <div class="stat__label"><span class="eyebrow">Tuần này</span><span class="stat__icon">${icon('calendar')}</span></div>
@@ -543,9 +582,9 @@ export default async function timePage(root, { query }) {
         <div class="stat__meta">TB ${minutes(weekSecs / 60 / Math.max(1, elapsedDays))} / ngày</div>
       </div>
       <div class="stat">
-        <div class="stat__label"><span class="eyebrow">Pomodoro hôm nay</span><span class="stat__icon">${icon('hourglass')}</span></div>
-        <div class="stat__value">${num(pm.todayCount)}<small>phiên</small></div>
-        <div class="stat__meta">≈ ${minutes(pm.todayCount * pm.cfg.focus)} tập trung sâu</div>
+        <div class="stat__label"><span class="eyebrow">Tháng này</span><span class="stat__icon">${icon('chart')}</span></div>
+        <div class="stat__value">${hoursMins(monthSecs)}</div>
+        <div class="stat__meta">${monthActive}/${monthDays} ngày có làm</div>
       </div>
       <div class="stat">
         <div class="stat__label"><span class="eyebrow">Độ sát ước tính</span><span class="stat__icon">${icon('target')}</span></div>
@@ -559,7 +598,7 @@ export default async function timePage(root, { query }) {
   const hoursMins = (secs) => {
     const m = Math.round(secs / 60);
     if (m < 60) return html`${m}<small>phút</small>`;
-    return html`${Math.floor(m / 60)}<small>g</small>${String(m % 60).padStart(2, '0')}<small>p</small>`;
+    return html`${Math.floor(m / 60)}<small>giờ</small> ${String(m % 60).padStart(2, '0')}<small>phút</small>`;
   };
 
   /* ================================================================ */
@@ -574,7 +613,7 @@ export default async function timePage(root, { query }) {
   /** Split an entry at local midnights → [{day, s, e}] (ms). Running entries end now. */
   function pieces(e) {
     const s = Date.parse(e.started_at);
-    const end = e.ended_at ? Date.parse(e.ended_at) : Date.now();
+    const end = e.ended_at ? Date.parse(e.ended_at) : timer.serverNow();
     const out = [];
     let cur = s;
     while (cur < end && out.length < 4) {
@@ -778,7 +817,7 @@ export default async function timePage(root, { query }) {
       : median < 0.85 ? `Bạn thường xong sớm (≈ ${dec(Math.round(median * 100) / 100)}× ước tính) — có thể nhận thêm việc.`
         : 'Ước tính của bạn khá sát thực tế. Giữ nhịp này!';
     mount(card, html`
-      ${sheetHead('T.6', 'Ước tính & thực tế', html`<span class="chart-key"><span><i style="background:var(--rule-strong)"></i>Ước tính</span><span><i style="background:var(--moss)"></i>Thực tế</span><span><i style="background:var(--clay)"></i>Vượt</span></span>`)}
+      ${sheetHead('T.6', 'Ước tính & thực tế', html`<span class="chart-key"><span><i style="background:var(--ink-4)"></i>Ước tính</span><span><i style="background:var(--moss)"></i>Thực tế</span><span><i style="background:var(--clay)"></i>Vượt</span></span>`)}
       <div class="sheet__body">
         <div class="chart-box" style="height:${list.length * 38 + 30}px" data-c></div>
         <p class="tm-advice">${icon('sparkle')}<span>${advice} <span class="faint">(${over}/${list.length} việc vượt ước tính)</span></span></p>
@@ -789,7 +828,7 @@ export default async function timePage(root, { query }) {
       data: {
         labels: list.map((t) => short(t.title)),
         datasets: [
-          { label: 'Ước tính', data: list.map((t) => t.estimated_minutes), backgroundColor: p.rule, borderRadius: 2, barPercentage: 0.9, categoryPercentage: 0.7 },
+          { label: 'Ước tính', data: list.map((t) => t.estimated_minutes), backgroundColor: p.ink4, borderRadius: 2, barPercentage: 0.9, categoryPercentage: 0.7 },
           { label: 'Thực tế', data: list.map((t) => t.actual_minutes), backgroundColor: list.map((t) => (t.actual_minutes > t.estimated_minutes * 1.1 ? p.clay : p.moss)), borderRadius: 2, barPercentage: 0.9, categoryPercentage: 0.7 },
         ],
       },
@@ -797,7 +836,7 @@ export default async function timePage(root, { query }) {
         indexAxis: 'y',
         scales: {
           x: { beginAtZero: true, grid: { display: true, color: p.rule }, ticks: { callback: (v) => minutes(v), maxTicksLimit: 5 } },
-          y: { grid: { display: false }, ticks: { color: p.ink2 } },
+          y: { grid: { display: false }, ticks: { color: p.ink2, autoSkip: false } },
         },
         plugins: { tooltip: { callbacks: { title: (c) => list[c[0].dataIndex].title, label: (c) => ` ${c.dataset.label}: ${minutes(c.raw)}` } } },
       },
@@ -810,18 +849,24 @@ export default async function timePage(root, { query }) {
   function renderLog() {
     const [from, to] = bounds();
     const rows = entries.filter((e) => { const d = dayOf(e.started_at); return d >= from && d <= to; });
-    const total = rows.reduce((s, e) => s + entrySeconds(e), 0);
-    const head = sheetHead('T.5', 'Các phiên', html`<span class="num muted tm-head-sum">${rows.length} phiên · ${minutes(total / 60)}</span>`);
+    const total = rows.reduce((s, e) => s + secsOf(e), 0);
+    const head = sheetHead('T.5', 'Các phiên', html`<span class="tm-log__head">
+      <span class="num muted tm-head-sum">${rows.length} phiên · ${minutes(total / 60)}</span>
+      ${rows.length ? html`<button class="icon-btn tm-touch" data-act="export" aria-label="Xuất CSV các phiên trong kỳ" title="Xuất CSV">${icon('download')}</button>` : ''}
+    </span>`);
     if (!rows.length) {
       mount($('[data-log]'), html`${head}${emptyState({ art: 'clock', small: true, title: 'Chưa có phiên nào trong kỳ', text: 'Bấm “Bắt đầu” ở trên hoặc ghi lại khoảng thời gian bạn đã làm.', action: html`<button class="btn btn--sm" data-act="manual">${icon('plus')} Ghi giờ thủ công</button>` })}`);
       return;
     }
+    const shown = rows.slice(0, logLimit);
     const groups = new Map();
-    rows.forEach((e) => { const d = dayOf(e.started_at); if (!groups.has(d)) groups.set(d, []); groups.get(d).push(e); });
+    const daySum = new Map();
+    rows.forEach((e) => { const d = dayOf(e.started_at); daySum.set(d, (daySum.get(d) || 0) + secsOf(e)); });
+    shown.forEach((e) => { const d = dayOf(e.started_at); if (!groups.has(d)) groups.set(d, []); groups.get(d).push(e); });
     mount($('[data-log]'), html`${head}
       <div class="tm-log">
       ${[...groups.entries()].map(([d, list]) => html`
-        <div class="group-head"><span class="group-head__day">${relDay(d)}<small>${day(d, 'numeric')}</small></span><span class="group-head__sum">${minutes(list.reduce((s, e) => s + entrySeconds(e), 0) / 60)}</span></div>
+        <div class="group-head"><span class="group-head__day">${relDay(d)}<small>${day(d, 'numeric')}</small></span><span class="group-head__sum">${minutes(daySum.get(d) / 60)}</span></div>
         <ul class="list">
           ${list.map((e) => {
             const running = !e.ended_at;
@@ -838,12 +883,31 @@ export default async function timePage(root, { query }) {
                   ${running ? html`<span class="badge badge--accent">Đang chạy</span>` : ''}
                 </span>
               </button>
-              <span class="tm-entry__dur num">${minutes(entrySeconds(e) / 60)}</span>
+              <span class="tm-entry__dur num">${durLabel(secsOf(e))}</span>
               ${running ? html`<span></span>` : html`<button class="icon-btn tm-touch" data-act="entry-menu" aria-label="Thao tác với phiên">${icon('more')}</button>`}
             </li>`;
           })}
         </ul>`)}
+      ${rows.length > shown.length ? html`<div class="tm-log__more"><button class="btn btn--sm btn--ghost" data-act="more">Hiện thêm ${Math.min(40, rows.length - shown.length)} phiên <span class="faint">(còn ${rows.length - shown.length})</span></button></div>` : ''}
       </div>`);
+  }
+
+  function exportCsv() {
+    const [from, to] = bounds();
+    const rows = entries.filter((e) => { const d = dayOf(e.started_at); return d >= from && d <= to; })
+      .sort((a, b) => a.started_at.localeCompare(b.started_at));
+    const csv = toCSV(rows, [
+      { label: 'Ngày', value: (e) => dayOf(e.started_at) },
+      { label: 'Bắt đầu', value: (e) => time(e.started_at) },
+      { label: 'Kết thúc', value: (e) => (e.ended_at ? time(e.ended_at) : '') },
+      { label: 'Số phút', value: (e) => Math.round(secsOf(e) / 60) },
+      { label: 'Công việc', value: (e) => e.task?.title || taskById(e.task_id)?.title || '' },
+      { label: 'Danh mục', value: (e) => catOf(e)?.name || '' },
+      { label: 'Ghi chú', value: (e) => e.description || '' },
+      { label: 'Nguồn', value: (e) => (e.source === 'manual' ? 'Thủ công' : 'Bấm giờ') },
+    ]);
+    downloadText(`thoi-gian_${from}_${to}.csv`, csv);
+    toast(`Đã xuất ${rows.length} phiên.`);
   }
 
   /* ================================================================ */
@@ -910,13 +974,27 @@ export default async function timePage(root, { query }) {
         if (!v.to) er.to = 'Chọn giờ kết thúc.';
         const r = compute(v);
         if (r && r.b > new Date(Date.now() + 60000)) er.to = 'Không thể ghi giờ trong tương lai.';
+        else if (r && r.mins < 1) er.to = 'Phiên phải dài ít nhất 1 phút.';
+        else if (r) {
+          // Client-side overlap check against what is loaded (the server re-checks new entries).
+          const clash = entries.find((x) => x.id !== entry?.id
+            && Date.parse(x.started_at) < r.b.getTime()
+            && (x.ended_at ? Date.parse(x.ended_at) : Date.now()) > r.a.getTime());
+          if (clash) er.from = `Trùng với phiên ${time(clash.started_at)}–${clash.ended_at ? time(clash.ended_at) : 'nay'} (${titleOf(clash)}).`;
+        }
         return er;
       },
       async onSubmit(v) {
         const r = compute(v);
         const payload = { task_id: v.task_id || null, description: v.description || null, started_at: r.a.toISOString(), ended_at: r.b.toISOString() };
-        if (entry) await updateEntry(entry.id, payload);
-        else await logTime({ taskId: payload.task_id, startedAt: payload.started_at, endedAt: payload.ended_at, description: payload.description });
+        try {
+          if (entry) await updateEntry(entry.id, payload);
+          else await logTime({ taskId: payload.task_id, startedAt: payload.started_at, endedAt: payload.ended_at, description: payload.description });
+        } catch (err) {
+          if (err?.code === 'time_overlap') return { errors: { from: err.message || 'Khoảng thời gian bị chồng lấn với một phiên khác.' } };
+          if (['endedAt', 'ended_at'].includes(err?.details?.field)) return { errors: { to: err.message } };
+          throw err;
+        }
         toast(entry ? 'Đã lưu phiên.' : `Đã thêm ${minutes(r.mins)} vào nhật ký.`);
         await loadData();
       },
@@ -924,7 +1002,7 @@ export default async function timePage(root, { query }) {
   }
 
   async function removeEntry(entry) {
-    if (!(await confirmDialog({ title: 'Xóa phiên này?', message: `Phiên ${minutes(entrySeconds(entry) / 60)} (${titleOf(entry)}) sẽ bị xóa và thời gian thực tế của công việc được tính lại.` }))) return;
+    if (!(await confirmDialog({ title: 'Xóa phiên này?', message: `Phiên ${minutes(secsOf(entry) / 60)} (${titleOf(entry)}) sẽ bị xóa và thời gian thực tế của công việc được tính lại.` }))) return;
     try {
       await deleteEntry(entry.id);
       toast('Đã xóa phiên.');
@@ -956,17 +1034,20 @@ export default async function timePage(root, { query }) {
     const t0 = today();
     const [from, to] = bounds();
     const ws = startOfWeek(t0);
-    const coversWeek = from <= ws && to >= t0;
+    const ms = startOfMonth(t0);
+    const sFrom = ws < ms ? ws : ms;
+    const covers = from <= sFrom && to >= t0;
     try {
-      const [tk, en, we] = await Promise.all([
+      const [tk, en, st] = await Promise.all([
         listTasks({ limit: 1000 }),
         listEntries({ from, to: to > t0 ? t0 : to }),
-        coversWeek ? null : listEntries({ from: ws, to: t0 }),
+        covers ? null : listEntries({ from: sFrom, to: t0 }),
       ]);
       if (seq !== loadSeq) return;
       tasks = tk;
       entries = en;
-      weekEntries = we || en.filter((e) => dayOf(e.started_at) >= ws);
+      statEntries = st || en.filter((e) => dayOf(e.started_at) >= sFrom);
+      loaded = true;
       lastKey = '';
       refresh();
       renderStats();
@@ -975,7 +1056,15 @@ export default async function timePage(root, { query }) {
       if (seq !== loadSeq) return;
       lastKey = '';
       refresh();
-      mount($('[data-log]'), html`${sheetHead('T.5', 'Các phiên')}<div class="sheet__body">${errorState(err)}</div>`);
+      if (loaded) { toast.error(err); return; }
+      // First load failed: replace every skeleton so nothing spins forever.
+      const fail = (sel, title) => mount($(sel), html`${sheetHead('', title)}<div class="sheet__body">${errorState(err, { retry: false })}</div>`);
+      mount($('[data-stats]'), '');
+      $('[data-tl]').hidden = true;
+      fail('[data-daily]', 'Giờ theo ngày');
+      fail('[data-cats]', 'Theo danh mục');
+      fail('[data-est]', 'Ước tính & thực tế');
+      mount($('[data-log]'), html`${sheetHead('', 'Các phiên')}<div class="sheet__body">${errorState(err)}</div>`);
     }
   }
 
@@ -1006,13 +1095,19 @@ export default async function timePage(root, { query }) {
     if (a === 'resume') return act(timer.resume);
     if (a === 'stop') return act(timer.stop, 'Đã lưu phiên làm việc.');
     if (a === 'skip') return act(timer.skipFocus);
-    if (a === 'next-focus') return act(timer.startNextFocus);
+    if (a === 'next-focus') {
+      // No paused session to continue (e.g. it was ended elsewhere) → start fresh on the picked task.
+      if (!timer.pausedSession() && !store.get().runningEntry) return act(() => timer.start({ taskId: pickTaskId || null, description: pickDesc || null }));
+      return act(timer.startNextFocus);
+    }
+    if (a === 'export') return exportCsv();
+    if (a === 'more') { logLimit += 40; return renderLog(); }
     if (a === 'focus') return openFocus();
     if (a === 'focus-exit') return closeFocus();
     if (a === 'pomo-settings') return openPomoSettings();
     if (a === 'manual') return openEntryForm();
     if (a === 'retry') return loadData();
-    if (a === 'now') { offset = 0; setQuery({ offset: null }); renderPeriodHead(); return loadData(); }
+    if (a === 'now') { offset = 0; logLimit = 40; setQuery({ offset: null }); renderPeriodHead(); return loadData(); }
     const id = el.closest('[data-entry]')?.dataset.entry;
     const entry = id && entries.find((x) => x.id === id);
     if (!entry) return;
@@ -1020,9 +1115,16 @@ export default async function timePage(root, { query }) {
     if (a === 'entry-menu') {
       popMenu(el, [
         { label: 'Sửa phiên', icon: 'edit', onClick: () => openEntryForm(entry) },
-        { label: 'Bấm giờ tiếp việc này', icon: 'play', onClick: () => {
+        { label: 'Bấm giờ tiếp việc này', icon: 'play', onClick: async () => {
           const t = taskById(entry.task_id);
           if (t && !OPEN.includes(t.status)) return toast.error('Công việc đã hoàn thành hoặc đã hủy.');
+          const busy = store.get().runningEntry || timer.pausedSession();
+          if (busy && !(await confirmDialog({
+            title: 'Chuyển sang phiên mới?',
+            message: 'Phiên hiện tại sẽ được kết thúc và lưu lại, rồi bắt đầu bấm giờ cho công việc này.',
+            confirmLabel: 'Chuyển phiên',
+            danger: false,
+          }))) return;
           act(() => timer.start({ taskId: entry.task_id || null, description: entry.description || null }), 'Đã bắt đầu bấm giờ.');
         } },
         'sep',
@@ -1033,6 +1135,12 @@ export default async function timePage(root, { query }) {
 
   disposers.push(on(root, 'click', '[data-act]', (e, el) => handleAct(el)));
   disposers.push(on(root, 'input', '[data-desc]', (e, el) => { pickDesc = el.value; }));
+  // Deferred hero re-render (see refresh): run it once the user leaves the form.
+  disposers.push(on(root, 'focusout', '.tm-hero__form', () => {
+    setTimeout(() => {
+      if (heroStale && !heroFormActive()) { heroStale = false; lastKey = ''; renderedKey = ''; refresh(); }
+    }, 150);
+  }));
   disposers.push(on(root, 'click', '[data-mode]', (e, el) => {
     timer.setTimerMode(el.dataset.mode);
     lastKey = '';
@@ -1041,6 +1149,7 @@ export default async function timePage(root, { query }) {
   disposers.push(on(root, 'click', '[data-period]', (e, el) => {
     if (el.dataset.period === period) return;
     period = el.dataset.period;
+    logLimit = 40;
     offset = 0;
     setQuery({ period: period === 'week' ? null : period, offset: null });
     renderPeriodHead();
@@ -1048,6 +1157,7 @@ export default async function timePage(root, { query }) {
   }));
   disposers.push(on(root, 'click', '[data-shift]', (e, el) => {
     offset = Math.min(0, offset + Number(el.dataset.shift));
+    logLimit = 40;
     setQuery({ offset: offset || null });
     renderPeriodHead();
     loadData();
@@ -1080,6 +1190,8 @@ export default async function timePage(root, { query }) {
     scheduleReload();
   }));
   disposers.push(onDataChanged(scheduleReload));
+  // Chart colours are resolved from CSS tokens at draw time: redraw on theme switch.
+  disposers.push(onThemeChange(() => { if (loaded) requestAnimationFrame(renderCharts); }));
 
   renderPeriodHead();
   refresh();
