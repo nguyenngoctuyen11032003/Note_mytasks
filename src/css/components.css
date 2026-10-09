@@ -27,7 +27,7 @@
 .btn--accent:hover:not(:disabled) { --btn-bg: var(--accent-ink); border-color: var(--accent-ink); }
 .btn--ghost { --btn-bg: transparent; --btn-bd: transparent; color: var(--ink-2); }
 .btn--ghost:hover:not(:disabled) { background: var(--surface-2); border-color: transparent; color: var(--ink); }
-.btn--danger { --btn-bg: var(--danger); --btn-fg: #fff; --btn-bd: var(--danger); }
+.btn--danger { --btn-bg: var(--danger); --btn-fg: var(--paper); --btn-bd: var(--danger); }
 .btn--danger-ghost { --btn-bg: transparent; --btn-bd: transparent; --btn-fg: var(--danger); }
 .btn--danger-ghost:hover:not(:disabled) { background: var(--danger-soft); border-color: transparent; }
 .btn--sm { height: 30px; padding: 0 var(--s-3); font-size: var(--fs-xs); }
@@ -374,7 +374,7 @@
 .dialog--wide { width: min(760px, calc(100vw - 24px)); }
 .dialog--narrow { width: min(420px, calc(100vw - 24px)); }
 .dialog[open] { display: flex; flex-direction: column; animation: dialog-in var(--t-med) var(--ease); }
-.dialog::backdrop { background: rgba(20, 16, 12, 0.45); backdrop-filter: blur(3px); animation: fade-in var(--t-med); }
+.dialog::backdrop { background: color-mix(in srgb, var(--surface-sunk) 60%, transparent); backdrop-filter: blur(3px); animation: fade-in var(--t-med); }
 @keyframes dialog-in { from { opacity: 0; transform: translateY(12px) scale(0.985); } to { opacity: 1; transform: none; } }
 @keyframes fade-in { from { opacity: 0; } }
 .dialog__head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s-4); padding: var(--s-5) var(--s-6) var(--s-4); border-bottom: 1px solid var(--rule); }
@@ -398,9 +398,9 @@
   font-size: var(--fs-sm); animation: toast-in var(--t-med) var(--ease);
 }
 .toast svg { width: 18px; height: 18px; margin-top: 1px; }
-.toast--success svg { color: #a9c47f; }
-.toast--error svg { color: #f09a8f; }
-.toast--info svg { color: #e9a37f; }
+.toast--success svg { color: var(--success); }
+.toast--error svg { color: var(--danger); }
+.toast--info svg { color: var(--accent); }
 .toast button { color: inherit; opacity: 0.6; }
 .toast button:hover { opacity: 1; }
 .toast.is-leaving { animation: toast-out var(--t-med) var(--ease) forwards; }
@@ -463,3 +463,10 @@ kbd { font-family: var(--font-mono); font-size: 10px; padding: 1px 5px; border-r
 @media (max-width: 960px) { .topbar .topbar__menu { display: inline-grid; } }
 .field { align-content: start; }
 .sheet__foot svg, .danger-text svg, .success-text svg { width: 14px; height: 14px; display: inline-block; vertical-align: -2px; }
+
+/* Touch devices: every tappable control gets a ≥ 40px hit target
+   (:root raises specificity over the later-loaded theme sizes). */
+@media (pointer: coarse) {
+  :root .icon-btn, :root .icon-btn--sm { min-width: 40px; min-height: 40px; }
+  :root .btn--sm { min-height: 40px; }
+}

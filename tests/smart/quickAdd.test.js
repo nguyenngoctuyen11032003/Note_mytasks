@@ -299,3 +299,130 @@ describe('parseTaskInput — combined & edge cases', () => {
     expect(() => parse('X', { today: '09/10/2026' })).toThrow();
   });
 });
+
+describe('parseTaskInput — clock time vs duration (H1)', () => {
+  it.each([
+    ['Họp 15h', '15:00', null, 'Họp 15h'],
+    ['Đi ngủ 23h', '23:00', null, 'Đi ngủ 23h'],
+    ['Gặp khách 10h30', '10:30', null, 'Gặp khách 10h30'],
+    ['Họp 10h mai !gấp #work', '10:00', '2026-10-10', 'Họp 10h'],
+    ['Họp 14h ngày 20/10', '14:00', '2026-10-20', 'Họp 14h'],
+    ['Họp 9 giờ thứ 4', '09:00', '2026-10-14', 'Họp 9 giờ'],
+    ['Họp 9 giờ 30 thứ 4', '09:30', '2026-10-14', 'Họp 9 giờ 30'],
+    ['Họp 9 giờ rưỡi', '09:30', null, 'Họp 9 giờ rưỡi'],
+    ['Họp 15h hôm nay', '15:00', '2026-10-09', 'Họp 15h'],
+  ])('%s → due_time %s', (text, time, due, title) => {
+    const r = parse(text);
+    expect(r.estimated_minutes).toBeNull();
+    expect(r.due_time).toBe(time);
+    expect(r.due_date).toBe(due);
+    expect(r.title).toBe(title);
+  });
+
+  it('"mỗi ngày 8h" is a daily reminder at 08:00, not an 8-hour task', () => {
+    expect(parse('Uống thuốc mỗi ngày 8h')).toMatchObject({ recurrence: 'daily', estimated_minutes: null, due_time: '08:00' });
+  });
+
+  it.each([
+    ['làm 2h', 120],
+    ['code 3h', 180],
+    ['Viết code 1h30m', 90],
+    ['Viết code 1g30p', 90],
+    ['Ngủ 8 tiếng', 480],
+    ['Họp 2 tiếng rưỡi', 150],
+    ['Chạy ~5h', 300],
+    ['Làm slide 1.5h', 90],
+    ['Trực 24h', 1440],
+    ['Chạy bộ 1h mỗi ngày', 60],
+  ])('%s stays a duration (%i min)', (text, min) => {
+    const r = parse(text);
+    expect(r.estimated_minutes).toBe(min);
+    expect(r.due_time).toBeUndefined();
+  });
+
+  it('am/pm', () => {
+    expect(parse('Gọi điện 9pm').due_time).toBe('21:00');
+    expect(parse('Gọi điện 9am').due_time).toBe('09:00');
+    expect(parse('Gọi điện 9:15 pm').due_time).toBe('21:15');
+    expect(parse('Gọi điện 12am').due_time).toBe('00:00');
+  });
+});
+
+describe('parseTaskInput — part of day inside the date phrase (M1)', () => {
+  it.each([
+    ['Họp team 9h sáng mai', '09:00', '2026-10-10', 'Họp team 9h'],
+    ['hop team 9h sang mai', '09:00', '2026-10-10', 'hop team 9h'],
+    ['Viết code 3h chiều mai', '15:00', '2026-10-10', 'Viết code 3h'],
+    ['Đi ngủ 11h đêm mai', '23:00', '2026-10-10', 'Đi ngủ 11h'],
+    ['Đón con lúc 4g30 chiều nay', '16:30', '2026-10-09', 'Đón con lúc 4g30'],
+    ['Xem phim 7h tối thứ 7', '19:00', '2026-10-10', 'Xem phim 7h'],
+    ['Đi ngủ 12h đêm mai', '00:00', '2026-10-10', 'Đi ngủ 12h'],
+    ['Ăn 12h trưa mai', '12:00', '2026-10-10', 'Ăn 12h'],
+    ['Ăn 1h trưa', '13:00', null, 'Ăn 1h trưa'],
+  ])('%s → %s', (text, time, due, title) => {
+    const r = parse(text);
+    expect(r).toMatchObject({ due_time: time, due_date: due, title, estimated_minutes: null });
+  });
+});
+
+describe('parseTaskInput — "tiếng" durations next to dates (M2)', () => {
+  it.each([
+    ['Họp 2 tiếng chiều mai', 120, '2026-10-10'],
+    ['Họp mai 2 tiếng', 120, '2026-10-10'],
+    ['Họp thứ 7 1 tiếng', 60, '2026-10-10'],
+  ])('%s → %i', (text, min, due) => {
+    const r = parse(text);
+    expect(r).toMatchObject({ estimated_minutes: min, due_date: due, title: 'Họp' });
+    expect(r.due_time).toBeUndefined();
+  });
+});
+
+describe('parseTaskInput — "ngày D tháng M [năm Y]" (M3)', () => {
+  it.each([
+    ['Họp ngày 15 tháng 11', '2026-11-15', 'Họp'],
+    ['Sinh nhật ngày 2 tháng 1', '2027-01-02', 'Sinh nhật'],
+    ['Sinh nhật ngày 2 tháng 1 năm 2028', '2028-01-02', 'Sinh nhật'],
+    ['Sinh nhật ngày 2 tháng 1 2028', '2028-01-02', 'Sinh nhật'],
+    ['Hop ngay 15 thang 11', '2026-11-15', 'Hop'],
+  ])('%s → %s', (text, due, title) => {
+    expect(parse(text)).toMatchObject({ due_date: due, title });
+  });
+
+  it('invalid "ngày 31 tháng 2" is ignored', () => {
+    expect(parse('Họp ngày 31 tháng 2').due_date).toBeNull();
+  });
+});
+
+describe('parseTaskInput — low-severity edge cases', () => {
+  it('"1-1" is a meeting type, not 1 January; "1/1" still is a date', () => {
+    expect(parse('Họp 1-1 với sếp')).toMatchObject({ due_date: null, title: 'Họp 1-1 với sếp' });
+    expect(parse('Họp 1/1 với sếp').due_date).toBe('2027-01-01');
+    expect(parse('Sinh nhật mẹ 5-11').due_date).toBe('2026-11-05');
+    expect(parse('Họp ngày 1-1').due_date).toBe('2027-01-01');
+  });
+
+  it('fractions are not dates', () => {
+    expect(parse('Đọc 3/4 cuốn sách')).toMatchObject({ due_date: null, title: 'Đọc 3/4 cuốn sách' });
+    expect(parse('Ăn 1/2 cái bánh')).toMatchObject({ due_date: null });
+    expect(parse('Đọc 1/2 chương')).toMatchObject({ due_date: null });
+    expect(parse('Mua quà 8/3').due_date).toBe('2027-03-08');
+  });
+
+  it('zero-width characters are stripped', () => {
+    expect(parse('​‌‍﻿').title).toBe('');
+    expect(parse('Nộp​ bài mai')).toMatchObject({ title: 'Nộp bài', due_date: '2026-10-10' });
+  });
+
+  it('weekday absorbs a preceding part of day', () => {
+    expect(parse('Đi siêu thị tối thứ 7')).toMatchObject({ title: 'Đi siêu thị', due_date: '2026-10-10' });
+    expect(parse('Học lớp 7 chiều t3')).toMatchObject({ title: 'Học lớp 7', due_date: '2026-10-13' });
+  });
+
+  it('today near 9999-12-31 never throws and never returns an invalid date', () => {
+    for (const s of ['Họp thứ hai tuần sau', 'X tuần sau', 'X mai', 'X cuối tháng sau', 'X 5/1', 'X ngày 3', 'X mỗi thứ 2', 'X 999 ngày nữa']) {
+      const r = parse(s, { today: '9999-12-31' });
+      expect(r.due_date === null || /^\d{4}-\d{2}-\d{2}$/.test(r.due_date)).toBe(true);
+    }
+    expect(parse('X tuần sau', { today: '9999-12-30' }).due_date).toBeNull();
+  });
+});

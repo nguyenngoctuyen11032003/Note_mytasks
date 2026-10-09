@@ -263,7 +263,13 @@ export function budgetForRange(budgetRows, from, to) {
  */
 export async function financeReport({ from, to, prevFrom, prevTo }) {
   const start = prevFrom && prevFrom < from ? prevFrom : from;
-  const [rows, budgetRows] = await Promise.all([fetchExpenseRows(start, to), listBudgets().catch(() => [])]);
+  const [rows, budgetRows, catRows] = await Promise.all([
+    fetchExpenseRows(start, to),
+    listBudgets().catch(() => []),
+    // Names for categories that only appear through a budget (no expense in range).
+    run(db().from('categories').select('id, name, color').eq('kind', 'expense')).catch(() => []),
+  ]);
+  const catInfo = new Map((catRows || []).map((c) => [c.id, c]));
   const cur = rows.filter((r) => r.spent_on >= from && r.spent_on <= to);
   const prev = prevFrom ? rows.filter((r) => r.spent_on >= prevFrom && r.spent_on <= prevTo) : [];
   const sum = (list) => list.reduce((s, r) => s + r.amount, 0);
@@ -272,7 +278,10 @@ export async function financeReport({ from, to, prevFrom, prevTo }) {
 
   const cats = new Map();
   const touch = (k, r) => {
-    if (!cats.has(k)) cats.set(k, { category_id: k, name: r?.category?.name ?? null, color: r?.category?.color ?? null, total: 0, count: 0, prev_total: 0, budget: null });
+    if (!cats.has(k)) {
+      const info = r?.category || (k != null ? catInfo.get(k) : null) || null;
+      cats.set(k, { category_id: k, name: info?.name ?? null, color: info?.color ?? null, total: 0, count: 0, prev_total: 0, budget: null });
+    }
     return cats.get(k);
   };
   cur.forEach((r) => { const c = touch(r.category_id ?? null, r); c.total += r.amount; c.count += 1; });

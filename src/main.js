@@ -4,6 +4,7 @@ import './css/layout.css';
 import './css/components.css';
 import './css/pages.css';
 import './css/theme.css';
+import './css/theme-f1.css';
 
 import { isConfigured } from './core/config.js';
 import * as store from './core/store.js';
@@ -26,6 +27,7 @@ import { errorState } from './components/states.js';
 import { notifyDataChanged } from './core/events.js';
 import { initLiquidGlass } from './components/liquidGlass.js';
 import { initMotion } from './components/motion.js';
+import { applySkin, currentSkin } from './components/skin.js';
 
 const app = document.getElementById('app');
 
@@ -409,6 +411,7 @@ function registerServiceWorker() {
   });
 }
 
+applySkin(currentSkin());
 initOfflineBanner();
 registerServiceWorker();
 boot();

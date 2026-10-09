@@ -9,7 +9,7 @@ import { openTaskForm } from '../components/taskForm.js';
 import { toast } from '../components/toast.js';
 import { setQuery } from '../core/router.js';
 import { onDataChanged, notifyDataChanged } from '../core/events.js';
-import { listTasks, setTaskStatus, updateTask } from '../services/tasks.js';
+import { listTasks, getTask, setTaskStatus, updateTask } from '../services/tasks.js';
 import { listEntries, entrySeconds } from '../services/timeEntries.js';
 import { listExpenses } from '../services/expenses.js';
 import {
@@ -47,6 +47,7 @@ function rangeOf(view, d) {
 function titleOf(view, d) {
   if (view === 'month') return monthLabel(d);
   const { from, to } = rangeOf(view, d);
+  if (from.slice(0, 7) === to.slice(0, 7)) return `${Number(from.slice(8))} – ${day(to, 'medium')}`;
   const sameYear = from.slice(0, 4) === to.slice(0, 4);
   return `${day(from, sameYear ? 'short' : 'medium')} – ${day(to, 'medium')}`;
 }
@@ -68,14 +69,14 @@ export default async function calendarPage(root, { query }) {
   let loadedKey = '';
   let token = 0;
   let dragId = null;
+  const taskNames = new Map(); // task_id → title, for entries whose task is due outside the range
   const disposers = [];
 
   mount(root, html`
     ${pageHead({
-      num: '04',
       kicker: 'Lịch',
-      title: 'Nhìn thời gian như một <em>bản vẽ</em>',
-      lede: 'Công việc theo hạn chót, giờ đã làm và khoản chi — xếp trên cùng một lưới ngày.',
+      title: 'Lịch của bạn',
+      lede: 'Công việc theo hạn chót, giờ đã làm và khoản chi trên cùng một lưới ngày.',
       actions: html`<button class="btn btn--primary" data-act="add">${icon('plus')} Thêm việc</button>`,
     })}
     <div class="calx-bar">
@@ -100,7 +101,7 @@ export default async function calendarPage(root, { query }) {
       <section class="sheet calx-main" data-main aria-busy="true">${loadingBlock(520)}</section>
       <aside class="sheet calx-day" data-day-sheet aria-label="Chi tiết ngày"></aside>
     </div>
-    <p class="calx-hint"><kbd>←</kbd> <kbd>→</kbd> chuyển kỳ · <kbd>T</kbd> về hôm nay · kéo thả công việc sang ngày khác để dời hạn</p>`);
+    <p class="calx-hint"><kbd>←</kbd> <kbd>→</kbd> chuyển kỳ · <kbd>T</kbd> về hôm nay · <kbd>N</kbd> thêm việc cho ngày đang chọn · nhấp đúp vào ngày để thêm việc · kéo thả công việc sang ngày khác để dời hạn</p>`);
 
   const $ = (s) => root.querySelector(s);
 
@@ -125,6 +126,14 @@ export default async function calendarPage(root, { query }) {
     });
     index = m;
   }
+  async function loadTaskNames() {
+    const have = new Set(data.tasks.map((t) => t.id));
+    const missing = [...new Set(data.entries.map((e) => e.task_id).filter((id) => id && !have.has(id) && !taskNames.has(id)))].slice(0, 40);
+    if (!missing.length) return;
+    const got = await Promise.all(missing.map((id) => getTask(id).catch(() => null)));
+    missing.forEach((id, i) => taskNames.set(id, got[i]?.title || ''));
+  }
+  const entryLabel = (e) => e.description || data.tasks.find((t) => t.id === e.task_id)?.title || taskNames.get(e.task_id) || 'Phiên làm việc';
   const at = (d) => index.get(d) || { tasks: [], entries: [], expenses: [], secs: 0, spend: 0 };
 
   async function load({ force = false } = {}) {
@@ -143,6 +152,8 @@ export default async function calendarPage(root, { query }) {
       ]);
       if (my !== token) return;
       data = { tasks, entries, expenses, from, to };
+      await loadTaskNames();
+      if (my !== token) return;
       loadedKey = key;
       buildIndex();
       renderMain();
@@ -248,7 +259,7 @@ export default async function calendarPage(root, { query }) {
                 ${layers.money && v.spend ? html`<span class="calx-fig calx-fig--money" title="Chi tiêu">${moneyShort(v.spend)}</span>` : ''}
               </header>
               ${layers.time ? html`
-                <div class="calx-wd__time ${v.secs ? '' : 'is-empty'}" title="${v.entries.map((e) => `${time(e.started_at)}–${e.ended_at ? time(e.ended_at) : 'nay'} · ${minutes(entrySeconds(e) / 60)}`).join('\n')}">
+                <div class="calx-wd__time ${v.secs ? '' : 'is-empty'}" title="${v.entries.map((e) => `${time(e.started_at)}–${e.ended_at ? time(e.ended_at) : 'nay'} · ${minutes(entrySeconds(e) / 60)} · ${entryLabel(e)}`).join('\n')}">
                   ${track(v.entries)}
                   <span class="calx-fig calx-fig--time">${v.secs ? minutes(v.secs / 60) : '—'}</span>
                 </div>` : ''}
@@ -320,8 +331,8 @@ export default async function calendarPage(root, { query }) {
     const open = v.tasks.filter(isOpen).length;
     mount(box, html`
       <div class="calx-day__head">
-        <span class="eyebrow">${nearLabel(date) || 'Ngày đã chọn'}</span>
-        <h3 class="display">${day(date, 'weekday')}</h3>
+        <span class="calx-day__kicker">${nearLabel(date) || 'Ngày đã chọn'}</span>
+        <h3>${day(date, 'weekday')}</h3>
         <dl class="calx-day__sum">
           <div><dt>Việc</dt><dd>${num(v.tasks.length)}${open && open !== v.tasks.length ? html`<small> · ${open} mở</small>` : ''}</dd></div>
           <div><dt>Đã làm</dt><dd>${minutes(v.secs / 60)}</dd></div>
@@ -330,19 +341,19 @@ export default async function calendarPage(root, { query }) {
         <button type="button" class="btn btn--primary btn--block calx-day__add" data-act="add">${icon('plus')} Thêm việc cho ngày này</button>
       </div>
       <div class="calx-day__sect">
-        <span class="eyebrow">Công việc đến hạn</span>
+        <div class="calx-day__label"><span>Công việc đến hạn</span><a href="#/tasks">Mở danh sách</a></div>
         ${v.tasks.length ? taskList(v.tasks, date) : html`<p class="calx-day__none">Không có việc nào đến hạn.</p>`}
       </div>
       <div class="calx-day__sect">
-        <span class="eyebrow">Phiên làm việc</span>
+        <div class="calx-day__label"><span>Phiên làm việc</span><a href="#/time">Bấm giờ</a></div>
         ${v.entries.length
-          ? html`${track(v.entries)}<ul class="mini-list">${v.entries.map((e) => html`<li><span class="num muted">${time(e.started_at)}–${e.ended_at ? time(e.ended_at) : 'nay'}</span><span class="grow truncate">${e.description || data.tasks.find((t) => t.id === e.task_id)?.title || 'Phiên làm việc'}</span><span class="num">${minutes(entrySeconds(e) / 60)}</span></li>`)}</ul>`
+          ? html`${track(v.entries)}<ul class="mini-list">${v.entries.map((e) => html`<li><span class="num muted">${time(e.started_at)}–${e.ended_at ? time(e.ended_at) : 'nay'}</span><span class="grow truncate">${entryLabel(e)}</span><span class="num">${minutes(entrySeconds(e) / 60)}</span></li>`)}</ul>`
           : html`<p class="calx-day__none">Chưa ghi nhận thời gian.</p>`}
       </div>
       <div class="calx-day__sect">
-        <span class="eyebrow">Khoản chi</span>
+        <div class="calx-day__label"><span>Khoản chi</span><a href="#/expenses">Ghi khoản chi</a></div>
         ${v.expenses.length
-          ? html`<ul class="mini-list">${v.expenses.map((x) => html`<li>${catLabel(x.category_id)}<span class="grow truncate">${x.description || ''}</span><span class="num">${money(x.amount)}</span></li>`)}</ul>`
+          ? html`<ul class="mini-list">${v.expenses.map((x) => html`<li>${catLabel(x.category_id)}<span class="grow truncate">${x.description || ''}</span><span class="num">${money(x.amount)}</span></li>`)}</ul>${v.expenses.length > 1 ? html`<div class="calx-day__total"><span>Tổng</span><span class="num">${money(v.spend)}</span></div>` : ''}`
           : html`<p class="calx-day__none">Không có khoản chi.</p>`}
       </div>`);
   }
@@ -409,8 +420,10 @@ export default async function calendarPage(root, { query }) {
       try {
         await setTaskStatus(t.id, next);
         t.status = next;
+        buildIndex();
         renderMain();
         renderDay();
+        if (next === 'completed') toast(`Đã hoàn thành “${t.title}”.`);
       } catch (err) {
         el.setAttribute('aria-checked', String(prev === 'completed'));
         toast.error(err);
@@ -469,6 +482,7 @@ export default async function calendarPage(root, { query }) {
     if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }
     else if (e.key === 'ArrowRight') { e.preventDefault(); step(1); }
     else if (e.key === 't' || e.key === 'T') { e.preventDefault(); goToday(); }
+    else if (e.key === 'n' || e.key === 'N') { e.preventDefault(); addFor(view === 'agenda' ? t0 : date); }
   };
   document.addEventListener('keydown', onKey);
   disposers.push(() => document.removeEventListener('keydown', onKey));

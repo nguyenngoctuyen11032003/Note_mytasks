@@ -84,6 +84,23 @@ const oneOrMany = (q, col, v) => {
  * @param {number} [f.limit=1000] @param {number} [f.offset=0]
  */
 export async function listTasks(f = {}) {
+  const limit = Math.min(Math.max(Number(f.limit) || 1000, 1), 5000);
+  const offset = Math.max(Number(f.offset) || 0, 0);
+  // PostgREST caps one response at max_rows (1000): fetch in pages, with id as a
+  // stable tiebreak so rows never shift between pages.
+  const out = [];
+  for (let from = offset; out.length < limit; from += PAGE) {
+    const want = Math.min(PAGE, limit - out.length);
+    const rows = (await run(taskQuery(f).range(from, from + want - 1))) || [];
+    out.push(...rows);
+    if (rows.length < want) break;
+  }
+  return normalize(out);
+}
+
+const PAGE = 1000;
+
+function taskQuery(f) {
   let q = db().from('tasks').select(SELECT);
   q = oneOrMany(q, 'status', f.status);
   q = oneOrMany(q, 'priority', f.priority);
@@ -99,10 +116,7 @@ export async function listTasks(f = {}) {
   const s = typeof f.search === 'string' ? f.search.trim() : '';
   if (s) q = q.or(searchOr(s, ['title', 'description']));
 
-  const limit = Math.min(Math.max(Number(f.limit) || 1000, 1), 5000);
-  const offset = Math.max(Number(f.offset) || 0, 0);
-  q = q.order('due_date', { ascending: true, nullsFirst: false }).order('created_at', { ascending: false }).range(offset, offset + limit - 1);
-  return normalize(await run(q));
+  return q.order('due_date', { ascending: true, nullsFirst: false }).order('created_at', { ascending: false }).order('id', { ascending: true });
 }
 
 /** Returns the task or null when it does not exist / is not visible. */
@@ -203,6 +217,16 @@ export async function restoreTask(task) {
 export async function duplicateTask(task, { title } = {}) {
   const snap = taskSnapshot(task);
   return createTask({ ...snap, status: 'todo', title: title || `${snap.title} (bản sao)`.slice(0, 200) });
+}
+
+/** Notes linked to a task (notes.task_id, migration 000700). Not trashed, newest first. */
+export async function listTaskNotes(taskId, { limit = 10 } = {}) {
+  requireId(taskId);
+  const n = Math.min(Math.max(Number(limit) || 10, 1), 50);
+  const q = db().from('notes').select('id, title, kind, updated_at')
+    .eq('task_id', taskId).is('trashed_at', null)
+    .order('updated_at', { ascending: false }).limit(n);
+  return (await run(q)) || [];
 }
 
 // Short aliases (tasks.list / tasks.get …)

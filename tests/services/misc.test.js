@@ -70,7 +70,7 @@ describe('kpis', () => {
     await kpis.listAllRecords('2026-01-01');
     const all = fake.last('from', 'kpi_records');
     expect(fake.argsOf(all, 'gte')).toEqual([['recorded_on', '2026-01-01']]);
-    expect(fake.argsOf(all, 'order')[0]).toEqual(['recorded_on', { ascending: true }]);
+    expect(fake.argsOf(all, 'order')[0]).toEqual(['recorded_on', { ascending: false }]); // newest first (cap drops oldest)
     await kpis.updateRecord('r', { value: 3, kpi_id: 'other' });
     expect(fake.argsOf(fake.last('from', 'kpi_records'), 'update')[0][0]).toEqual({ value: 3 });
     expect(await kpis.deleteRecord('r')).toBe(true);
@@ -106,15 +106,15 @@ describe('auth', () => {
 
   it('signUp sends display_name and emailRedirectTo = appBaseUrl()', async () => {
     fake.respond('auth:signUp', { data: { user: { id: 'u', identities: [{}] }, session: null } });
-    await auth.signUp('a@b.co', 'secret1', '  Nam  ');
+    await auth.signUp('a@b.co', 'secret12', '  Nam  ');
     expect(fake.last('auth', 'signUp').args[0]).toEqual({
-      email: 'a@b.co', password: 'secret1', options: { data: { display_name: 'Nam' }, emailRedirectTo: 'https://x.github.io/repo/' },
+      email: 'a@b.co', password: 'secret12', options: { data: { display_name: 'Nam' }, emailRedirectTo: 'https://x.github.io/repo/' },
     });
   });
 
   it('signUp: existing email (no identities) → user_already_exists; short password → invalid_input', async () => {
     fake.respond('auth:signUp', { data: { user: { id: 'u', identities: [] }, session: null } });
-    await expect(auth.signUp('a@b.co', 'secret1', 'N')).rejects.toMatchObject({ code: 'user_already_exists' });
+    await expect(auth.signUp('a@b.co', 'secret12', 'N')).rejects.toMatchObject({ code: 'user_already_exists' });
     await expect(auth.signUp('a@b.co', '123', 'N')).rejects.toMatchObject({ code: 'invalid_input', details: { field: 'password' } });
   });
 

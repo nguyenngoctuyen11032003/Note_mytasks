@@ -93,6 +93,9 @@ export function makeChart(container, { type, data, options }) {
   container.innerHTML = '';
   const canvas = document.createElement('canvas');
   container.append(canvas);
-  const chart = new Chart(canvas, { type, data, options: merge(baseOptions(type), options) });
+  const opts = merge(baseOptions(type), options);
+  // Printing: draw the final frame immediately so the print snapshot is never mid-animation.
+  if (document.documentElement.dataset.print) opts.animation = false;
+  const chart = new Chart(canvas, { type, data, options: opts });
   return () => chart.destroy();
 }

@@ -35,6 +35,7 @@ describe('tasks.listTasks', () => {
     expect(fake.argsOf(c, 'order')).toEqual([
       ['due_date', { ascending: true, nullsFirst: false }],
       ['created_at', { ascending: false }],
+      ['id', { ascending: true }],
     ]);
     expect(fake.argsOf(c, 'range')).toEqual([[100, 149]]);
   });

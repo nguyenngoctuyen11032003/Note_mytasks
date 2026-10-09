@@ -1,7 +1,7 @@
 // Compat facade over timer.js (kept for existing imports). New code should
 // import from './timer.js'. Start/stop go through the atomic RPCs
 // start_timer/stop_timer (migration 000200).
-import { db, run, requireId, vInstant, numify } from './errors.js';
+import { db, run, requireId, vInstant, numify, fetchPaged } from './errors.js';
 import * as timer from './timer.js';
 
 const COLS = 'id, task_id, description, started_at, ended_at, duration_seconds, source, created_at';
@@ -12,18 +12,23 @@ export async function getRunningEntry() {
   return norm(await run(db().from('time_entries').select(COLS).is('ended_at', null).maybeSingle()));
 }
 
-/** Entries that started in [fromIso, toIso). */
-export async function listEntries(fromIso, toIso, { taskId } = {}) {
+const MAX_ROWS = 5000; // paged past PostgREST max_rows (1000)
+
+/** Entries that started in [fromIso, toIso) (newest first, at most 5000). */
+export async function listEntries(fromIso, toIso, opts = {}) {
+  const { taskId } = opts || {};
   let q = db().from('time_entries').select(COLS)
     .gte('started_at', vInstant(fromIso, 'from', { required: true }))
     .lt('started_at', vInstant(toIso, 'to', { required: true }));
   if (taskId) q = q.eq('task_id', taskId);
-  return norm(await run(q.order('started_at', { ascending: false }).limit(2000)));
+  return norm(await fetchPaged(q.order('started_at', { ascending: false }).order('id', { ascending: true }), MAX_ROWS));
 }
 
 export async function listEntriesForTask(taskId) {
   requireId(taskId, 'task_id');
-  return norm(await run(db().from('time_entries').select(COLS).eq('task_id', taskId).order('started_at', { ascending: false })));
+  const q = db().from('time_entries').select(COLS).eq('task_id', taskId)
+    .order('started_at', { ascending: false }).order('id', { ascending: true });
+  return norm(await fetchPaged(q));
 }
 
 /** Start a timer segment (any running one is closed by the RPC). */

@@ -6,6 +6,8 @@ import { pageHead, swatchPicker, SWATCHES } from '../components/ui.js';
 import { openModal, field, input, select, confirmDialog } from '../components/modal.js';
 import { toast } from '../components/toast.js';
 import { applyTheme } from '../components/theme.js';
+import { applySkin, currentSkin, SKINS } from '../components/skin.js';
+import { GO_KEYS, MOD } from '../components/commandPalette.js';
 import { reloadCategories } from '../components/context.js';
 import * as store from '../core/store.js';
 import { notifyDataChanged } from '../core/events.js';
@@ -38,23 +40,26 @@ const SECTIONS = [
   ['s-keys', 'Phím tắt', 'keyboard'],
   ['s-install', 'Cài đặt ứng dụng', 'phone'],
 ];
-const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent || '');
-const MOD = IS_MAC ? '⌘' : 'Ctrl';
+// Global shortcuts (components/shortcuts.js); the "G then X" list is derived
+// from the command palette's GO_KEYS so it never drifts.
+const pageLabel = (path) => HOME_PAGES.find((h) => h.path === path)?.label || path.slice(1);
 const SHORTCUTS = [
   { keys: [[MOD, 'K']], label: 'Mở tìm kiếm & bảng lệnh' },
+  { keys: [['/']], label: 'Tìm kiếm (trong trang nếu có ô tìm)' },
   { keys: [['N']], label: 'Tạo mới (công việc, ghi chú, khoản chi…)' },
-  { keys: [['G'], ['D']], label: 'Đi tới Tổng quan' },
-  { keys: [['G'], ['N']], label: 'Đi tới Ghi chú' },
-  { keys: [['G'], ['T']], label: 'Đi tới Công việc' },
-  { keys: [['G'], ['C']], label: 'Đi tới Lịch' },
-  { keys: [['G'], ['H']], label: 'Đi tới Thời gian' },
-  { keys: [['G'], ['K']], label: 'Đi tới Mục tiêu KPI' },
-  { keys: [['G'], ['E']], label: 'Đi tới Chi tiêu' },
-  { keys: [['G'], ['S']], label: 'Đi tới Mua sắm' },
-  { keys: [['G'], ['R']], label: 'Đi tới Báo cáo' },
+  ...Object.entries(GO_KEYS).map(([k, path]) => ({ keys: [['G'], [k.toUpperCase()]], label: `Đi tới ${pageLabel(path)}` })),
   { keys: [['?']], label: 'Mở bảng trợ giúp phím tắt' },
   { keys: [['Esc']], label: 'Đóng hộp thoại / menu đang mở' },
 ];
+// Page-specific keys (keep in sync with the pages).
+const PAGE_SHORTCUTS = [
+  ['Công việc', [{ keys: [['J'], ['K']], sep: '/', label: 'Xuống / lên trong danh sách' }, { keys: [['Space']], label: 'Hoàn thành / mở lại' }, { keys: [['E']], label: 'Sửa việc đang chọn' }, { keys: [['X']], label: 'Chọn / bỏ chọn' }]],
+  ['Ghi chú', [{ keys: [[MOD, 'S']], label: 'Lưu ngay' }, { keys: [[MOD, '/']], label: 'Soạn thảo / xem trước' }]],
+  ['Lịch', [{ keys: [['←'], ['→']], sep: '/', label: 'Kỳ trước / kỳ sau' }, { keys: [['T']], label: 'Về hôm nay' }]],
+  ['Thời gian', [{ keys: [['Space']], label: 'Bắt đầu / tạm dừng / tiếp tục' }, { keys: [['F']], label: 'Chế độ tập trung' }]],
+  ['Báo cáo', [{ keys: [['←'], ['→']], sep: '/', label: 'Kỳ trước / kỳ sau' }]],
+];
+const keysRow = (sc) => html`<div class="st-keys__row"><dt>${sc.keys.map((combo, i) => html`${i ? html`<span class="st-keys__then">${sc.sep || 'rồi'}</span>` : ''}<span class="st-keys__combo">${combo.map((k, j) => html`${j ? '+' : ''}<kbd>${k}</kbd>`)}</span>`)}</dt><dd>${sc.label}</dd></div>`;
 
 function timezoneList(current) {
   let all = [];
@@ -90,15 +95,15 @@ export default async function settingsPage(root) {
     const standalone = window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true;
 
     mount(root, html`
-      ${pageHead({ num: '09', kicker: 'Cài đặt', title: 'Sắp đặt <em>góc làm việc</em>', lede: 'Hồ sơ, tuỳ chọn hiển thị, danh mục, bảo mật và sao lưu dữ liệu — tất cả ở một nơi.' })}
+      ${pageHead({ title: 'Cài đặt', lede: 'Hồ sơ, tuỳ chọn hiển thị, danh mục, bảo mật và sao lưu dữ liệu — tất cả ở một nơi.' })}
       <div class="st">
         <nav class="st-nav" aria-label="Mục cài đặt">
-          ${SECTIONS.map(([id, label, ic], i) => html`<a href="#${id}" data-jump="${id}">${icon(ic)}<span>${label}</span></a>`)}
+          ${SECTIONS.map(([id, label, ic]) => html`<a href="#${id}" data-jump="${id}">${icon(ic)}<span>${label}</span></a>`)}
         </nav>
         <div class="st-body">
 
           <section class="st-sect" id="s-profile" aria-labelledby="h-profile">
-            ${head('S.1', 'h-profile', 'Hồ sơ', 'Tên hiển thị dùng trong lời chào, thanh bên và báo cáo. Màu ảnh đại diện lưu trên thiết bị này.')}
+            ${head('h-profile', 'Hồ sơ', 'Tên hiển thị dùng trong lời chào, thanh bên và báo cáo. Màu ảnh đại diện lưu trên thiết bị này.')}
             <form class="st-form" data-form="profile" novalidate>
               <div class="st-profile">
                 <span class="avatar avatar--lg st-avatar" data-avatar style="${avatar ? `--avatar-bg:${avatar};--avatar-fg:var(--accent-contrast)` : ''}">${initials(store.displayName())}</span>
@@ -119,12 +124,18 @@ export default async function settingsPage(root) {
           </section>
 
           <section class="st-sect" id="s-prefs" aria-labelledby="h-prefs">
-            ${head('S.2', 'h-prefs', 'Tuỳ chọn', 'Ảnh hưởng đến cách ngày, tuần và tiền tệ được tính trên mọi trang.')}
+            ${head('h-prefs', 'Tuỳ chọn', 'Ảnh hưởng đến cách ngày, tuần và tiền tệ được tính trên mọi trang.')}
             <div class="st-form">
               <div class="field">
                 <span class="field__label">Giao diện <span class="opt">áp dụng ngay</span></span>
                 <div class="segmented st-theme" role="radiogroup" aria-label="Giao diện">
                   ${THEMES.map(([v, l, ic]) => html`<label><input type="radio" name="theme" data-theme-pick value="${v}" ${(p.theme || 'system') === v ? raw('checked') : ''} /><span>${icon(ic)} ${l}</span></label>`)}
+                </div>
+              </div>
+              <div class="field">
+                <span class="field__label">Phong cách <span class="opt">chỉ trên thiết bị này</span></span>
+                <div class="segmented st-theme" role="radiogroup" aria-label="Phong cách">
+                  ${SKINS.map(([v, l]) => html`<label><input type="radio" name="skin" data-skin-pick value="${v}" ${currentSkin() === v ? raw('checked') : ''} /><span>${l}</span></label>`)}
                 </div>
               </div>
             </div>
@@ -150,7 +161,7 @@ export default async function settingsPage(root) {
           </section>
 
           <section class="st-sect" id="s-cats" aria-labelledby="h-cats">
-            ${head('S.3', 'h-cats', 'Danh mục', 'Kéo biểu tượng ⋮⋮ (hoặc dùng phím mũi tên) để sắp xếp. Xoá danh mục không xoá dữ liệu — các mục liên quan trở thành “chưa phân loại”.')}
+            ${head('h-cats', 'Danh mục', 'Kéo biểu tượng ⋮⋮ (hoặc dùng phím mũi tên) để sắp xếp. Xoá danh mục không xoá dữ liệu — các mục liên quan trở thành “chưa phân loại”.')}
             <div class="st-form">
               <div class="st-cats__bar">
                 <div class="segmented" role="group" aria-label="Loại danh mục">
@@ -164,7 +175,7 @@ export default async function settingsPage(root) {
           </section>
 
           <section class="st-sect" id="s-security" aria-labelledby="h-security">
-            ${head('S.4', 'h-security', 'Bảo mật', 'Đổi mật khẩu đăng nhập. Bạn cần nhập mật khẩu hiện tại để xác nhận.')}
+            ${head('h-security', 'Bảo mật', 'Đổi mật khẩu đăng nhập. Bạn cần nhập mật khẩu hiện tại để xác nhận.')}
             <form class="st-form" data-form="password" novalidate>
               <input type="email" name="username" value="${s.user?.email || ''}" autocomplete="username" hidden />
               ${field({ label: 'Mật khẩu hiện tại', name: 'current', control: input('current', '', 'type="password" autocomplete="current-password"') })}
@@ -177,7 +188,7 @@ export default async function settingsPage(root) {
           </section>
 
           <section class="st-sect" id="s-data" aria-labelledby="h-data">
-            ${head('S.5', 'h-data', 'Dữ liệu', 'Dữ liệu được bảo vệ bằng Row Level Security — chỉ tài khoản này đọc và ghi được. Hãy sao lưu định kỳ.')}
+            ${head('h-data', 'Dữ liệu', 'Dữ liệu được bảo vệ bằng Row Level Security — chỉ tài khoản này đọc và ghi được. Hãy sao lưu định kỳ.')}
             <div class="st-form">
               <div class="st-data">
                 <article class="st-card">
@@ -213,16 +224,17 @@ export default async function settingsPage(root) {
           </section>
 
           <section class="st-sect" id="s-keys" aria-labelledby="h-keys">
-            ${head('S.6', 'h-keys', 'Phím tắt', 'Làm việc nhanh hơn bằng bàn phím. Phím tắt không hoạt động khi bạn đang gõ trong ô nhập liệu.')}
+            ${head('h-keys', 'Phím tắt', 'Làm việc nhanh hơn bằng bàn phím. Phím tắt không hoạt động khi bạn đang gõ trong ô nhập liệu.')}
             <div class="st-form">
               <dl class="st-keys">
-                ${SHORTCUTS.map((sc) => html`<div class="st-keys__row"><dt>${sc.keys.map((combo, i) => html`${i ? html`<span class="st-keys__then">rồi</span>` : ''}<span class="st-keys__combo">${combo.map((k, j) => html`${j ? '+' : ''}<kbd>${k}</kbd>`)}</span>`)}</dt><dd>${sc.label}</dd></div>`)}
+                ${SHORTCUTS.map(keysRow)}
               </dl>
+              ${PAGE_SHORTCUTS.map(([title, list]) => html`<h3 class="st-sub">${title}</h3><dl class="st-keys">${list.map(keysRow)}</dl>`)}
             </div>
           </section>
 
           <section class="st-sect" id="s-install" aria-labelledby="h-install">
-            ${head('S.7', 'h-install', 'Cài đặt ứng dụng', 'Note_mytasks là ứng dụng web cài được (PWA): mở nhanh từ màn hình chính, toàn màn hình, không cần cửa hàng ứng dụng.')}
+            ${head('h-install', 'Cài đặt ứng dụng', 'Note_mytasks là ứng dụng web cài được (PWA): mở nhanh từ màn hình chính, toàn màn hình, không cần cửa hàng ứng dụng.')}
             <div class="st-form">
               ${standalone ? html`<p class="notice notice--success">${icon('checkCircle')}<span>Bạn đang dùng Note_mytasks như một ứng dụng đã cài đặt.</span></p>` : ''}
               <div class="st-install">
@@ -260,7 +272,7 @@ export default async function settingsPage(root) {
     watchSections();
   }
 
-  function head(num, id, title, text) {
+  function head(id, title, text) {
     return html`<header class="st-head"><div><h2 id="${id}">${title}</h2><p>${text}</p></div></header>`;
   }
 
@@ -396,8 +408,11 @@ export default async function settingsPage(root) {
     try {
       const data = await downloadBackup({ onProgress: ({ label }) => { if (status) status.textContent = `Đang đọc: ${label}…`; } });
       const total = Object.values(data.counts).reduce((s, n) => s + n, 0);
-      if (status) status.textContent = `Đã tải ${num(total)} dòng lúc ${dateTime(new Date())}.`;
-      toast(`Đã tạo bản sao lưu (${num(total)} dòng).`);
+      const missing = (data.missing || []).map(tableLabel);
+      const skipped = missing.length ? ` Bỏ qua (chưa có trên máy chủ hoặc không đọc được): ${missing.join(', ')}.` : '';
+      if (status) status.textContent = `Đã tải ${num(total)} dòng lúc ${dateTime(new Date())}.${skipped}`;
+      if (missing.length) toast.info(`Đã tạo bản sao lưu (${num(total)} dòng), nhưng thiếu: ${missing.join(', ')}.`);
+      else toast(`Đã tạo bản sao lưu (${num(total)} dòng).`);
     } catch (err) {
       if (status) status.textContent = 'Sao lưu chưa thành công.';
       toast.error(err);
@@ -539,6 +554,9 @@ export default async function settingsPage(root) {
       toast.error(err);
     }
     applyTheme(theme, { persist: true }); // the app re-renders this page
+  }));
+  disposers.push(on(root, 'change', '[data-skin-pick]', (e, el) => {
+    applySkin(el.value, { persist: true });
   }));
   disposers.push(on(root, 'click', '[data-jump]', (e, el) => {
     e.preventDefault(); // keep the hash router intact

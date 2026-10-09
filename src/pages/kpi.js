@@ -1,4 +1,4 @@
-// § 05 Mục tiêu KPI — forecast-driven KPI board: summary strip, cards with
+// Mục tiêu KPI — forecast-driven KPI board: summary strip, cards with
 // ring + sparkline + projection, detail view with history chart and records.
 import { html, mount, on, raw } from '../utils/dom.js';
 import { icon } from '../components/icons.js';
@@ -24,11 +24,11 @@ const STATUS = {
 
 /** Forecast status (kpi_forecast.status) → presentation. */
 const FC = {
-  on_track: { label: 'Đúng tiến độ', badge: 'info', color: 'var(--indigo)', rank: 3 },
-  at_risk: { label: 'Có rủi ro', badge: 'warning', color: 'var(--ochre)', rank: 1 },
-  off_track: { label: 'Chệch hướng', badge: 'danger', color: 'var(--clay)', rank: 0 },
+  on_track: { label: 'Đúng tiến độ', badge: 'accent', color: 'var(--accent)', rank: 3 },
+  at_risk: { label: 'Có rủi ro', badge: 'warning', color: 'var(--warning)', rank: 1 },
+  off_track: { label: 'Chệch hướng', badge: 'danger', color: 'var(--danger)', rank: 0 },
   no_data: { label: 'Chưa đủ dữ liệu', badge: 'muted', color: 'var(--ink-3)', rank: 2 },
-  achieved: { label: 'Đã đạt', badge: 'success', color: 'var(--moss)', rank: 4 },
+  achieved: { label: 'Đã đạt', badge: 'success', color: 'var(--success)', rank: 4 },
 };
 const FC_ORDER = ['on_track', 'at_risk', 'off_track', 'no_data', 'achieved'];
 
@@ -53,6 +53,15 @@ function spanDates(span) {
 }
 
 const unitTxt = (u) => (u ? ` ${u}` : '');
+/** Compact number for tight card cells: 66.000.000 → "66 tr", 1.250.000.000 → "1,25 tỷ". */
+function short(v) {
+  const n = Number(v) || 0;
+  const a = Math.abs(n);
+  if (a >= 1e9) return `${dec(Math.round(n / 1e8) / 10)} tỷ`;
+  if (a >= 1e6) return `${dec(Math.round(n / 1e5) / 10)} tr`;
+  if (a >= 1e5) return `${dec(Math.round(n / 100) / 10)}k`;
+  return dec(Math.round(n * 100) / 100);
+}
 const fmtVal = (v, u) => `${dec(Math.round(Number(v) * 100) / 100)}${unitTxt(u)}`;
 /** "1.250,5" / "1,5" / "1250.5" → number */
 function parseNum(s) {
@@ -80,9 +89,8 @@ export default async function kpiPage(root, { query }) {
 
   mount(root, html`
     ${pageHead({
-      num: '05',
       kicker: 'Mục tiêu KPI',
-      title: 'Những con số <em>dẫn đường</em>',
+      title: 'Những con số dẫn đường',
       lede: 'Mỗi lần cập nhật là một ảnh chụp giá trị thực tế. Hệ thống tính tốc độ bằng hồi quy tuyến tính để dự báo bạn có kịp hạn không.',
       actions: html`<button class="btn btn--primary" data-act="new">${icon('plus')} KPI mới</button>`,
     })}
@@ -176,7 +184,7 @@ export default async function kpiPage(root, { query }) {
     return html`
       <article class="sheet kp-card" data-id="${k.id}" data-forecast="${f.status}" style="--c:${meta.color}">
         <header class="kp-card__head">
-          ${ring(p, { size: 76, color: meta.color })}
+          ${ring(p, { size: 64, color: meta.color })}
           <div class="grow">
             <div class="row-wrap">
               <span class="badge badge--${meta.badge}">${meta.label}</span>
@@ -189,9 +197,9 @@ export default async function kpiPage(root, { query }) {
           <button class="icon-btn kp-touch" data-act="menu" aria-label="Thao tác với ${k.name}">${icon('more')}</button>
         </header>
         <dl class="kp-card__nums">
-          <div><dt>Hiện tại</dt><dd><strong>${dec(k.current_value)}</strong><small>${k.unit}</small></dd></div>
-          <div><dt>Mục tiêu</dt><dd><strong>${dec(k.target_value)}</strong><small>${k.unit}</small></dd></div>
-          <div><dt>Dự báo cuối kỳ</dt><dd><strong class="${f.projected_value != null && f.projected_value < k.target_value ? 'kp-short' : ''}">${f.projected_value != null ? dec(Math.round(f.projected_value * 10) / 10) : '—'}</strong>${f.projected_value != null ? html`<small>${k.unit}</small>` : ''}</dd></div>
+          <div title="${fmtVal(k.current_value, k.unit)}"><dt>Hiện tại</dt><dd><strong>${short(k.current_value)}</strong><small>${k.unit}</small></dd></div>
+          <div title="${fmtVal(k.target_value, k.unit)}"><dt>Mục tiêu</dt><dd><strong>${short(k.target_value)}</strong><small>${k.unit}</small></dd></div>
+          <div title="${f.projected_value != null ? fmtVal(f.projected_value, k.unit) : 'Chưa đủ dữ liệu để dự báo'}"><dt>Dự báo cuối kỳ</dt><dd><strong class="${f.projected_value != null && f.projected_value < k.target_value ? 'kp-short' : ''}">${f.projected_value != null ? short(Math.round(f.projected_value * 10) / 10) : '—'}</strong>${f.projected_value != null ? html`<small>${k.unit}</small>` : ''}</dd></div>
         </dl>
         <div class="kp-card__track">
           <div class="bar"><span style="width:${Math.min(100, p)}%;--c:${meta.color}"></span>${exp != null ? html`<i class="bar__marker" style="left:${Math.min(100, exp)}%"></i>` : ''}</div>
@@ -289,22 +297,39 @@ export default async function kpiPage(root, { query }) {
     detail = { id: k.id, render: doRender, close: m.close };
     doRender();
 
-    m.el.addEventListener('submit', async (e) => {
-      const form = e.target.closest('[data-addrec]');
-      if (!form) return;
-      e.preventDefault();
+    // The dialog body already sits inside the modal's <form>, so the add-record
+    // box is a plain group (nested forms are dropped by the HTML parser) and is
+    // submitted by its button or by Enter in one of its inputs.
+    let saving = false;
+    const addRec = async () => {
+      const grp = m.el.querySelector('[data-addrec]');
+      if (!grp || saving) return;
       const kk = kpis.find((x) => x.id === k.id);
-      const v = parseNum(form.value.value);
-      if (!Number.isFinite(v)) { form.value.focus(); return toast.error('Nhập một số hợp lệ.'); }
-      const btn = form.querySelector('button[type=submit]');
-      btn.disabled = true;
+      const vIn = grp.querySelector('[data-rec=value]');
+      const dIn = grp.querySelector('[data-rec=recorded_on]');
+      const nIn = grp.querySelector('[data-rec=note]');
+      const v = parseNum(vIn.value);
+      if (!Number.isFinite(v)) { vIn.setAttribute('aria-invalid', 'true'); vIn.focus(); return toast.error('Nhập một số hợp lệ, ví dụ 12 hoặc 12,5.'); }
+      const d = dIn.value || today();
+      if (d > today()) { dIn.setAttribute('aria-invalid', 'true'); dIn.focus(); return toast.error('Ngày ghi nhận không được ở tương lai.'); }
+      const btn = grp.querySelector('[data-addrec-go]');
+      saving = true; btn.disabled = true;
       try {
-        await addRecord(kk.id, { recorded_on: form.recorded_on.value || today(), value: v, note: form.note.value.trim() || null });
+        await addRecord(kk.id, { recorded_on: d, value: v, note: nIn.value.trim() || null });
         recordToast(kk, v);
         await load();
-      } catch (err) { toast.error(err); } finally { btn.disabled = false; }
+      } catch (err) { toast.error(err); } finally { saving = false; if (btn.isConnected) btn.disabled = false; }
+    };
+    m.el.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || !e.target.closest?.('[data-addrec]')) return;
+      e.preventDefault();
+      addRec();
     });
+    m.el.addEventListener('input', (e) => { if (e.target.closest?.('[data-addrec]')) e.target.removeAttribute('aria-invalid'); });
+    // Never let an implicit submit of the wrapper form close the detail view.
+    m.form?.addEventListener('submit', (e) => { e.stopImmediatePropagation(); e.preventDefault(); }, { capture: true });
     m.el.addEventListener('click', async (e) => {
+      if (e.target.closest('[data-addrec-go]')) return addRec();
       const kk = kpis.find((x) => x.id === k.id);
       const ed = e.target.closest('[data-edit-rec]');
       const del = e.target.closest('[data-del-rec]');
@@ -382,12 +407,12 @@ export default async function kpiPage(root, { query }) {
       </div>
 
       ${k.status !== 'archived' ? html`
-        <form class="kp-addrec" data-addrec novalidate>
-          <div class="field"><label class="field__label" for="kp-v">Giá trị${k.unit ? ` (${k.unit})` : ''}</label><input id="kp-v" class="input" name="value" inputmode="decimal" autocomplete="off" required placeholder="${dec(k.current_value)}" /></div>
-          <div class="field"><label class="field__label" for="kp-d">Ngày</label><input id="kp-d" class="input" type="date" name="recorded_on" value="${today()}" max="${today()}" required /></div>
-          <div class="field kp-addrec__note"><label class="field__label" for="kp-n">Ghi chú</label><input id="kp-n" class="input" name="note" maxlength="1000" autocomplete="off" placeholder="Không bắt buộc" /></div>
-          <button class="btn btn--primary" type="submit">${icon('plus')} Ghi nhận</button>
-        </form>
+        <div class="kp-addrec" data-addrec role="group" aria-label="Ghi nhận giá trị mới">
+          <div class="field"><label class="field__label" for="kp-v">Giá trị${k.unit ? ` (${k.unit})` : ''}</label><input id="kp-v" class="input" data-rec="value" inputmode="decimal" autocomplete="off" placeholder="${dec(k.current_value)}" /></div>
+          <div class="field"><label class="field__label" for="kp-d">Ngày</label><input id="kp-d" class="input" type="date" data-rec="recorded_on" value="${today()}" max="${today()}" /></div>
+          <div class="field kp-addrec__note"><label class="field__label" for="kp-n">Ghi chú</label><input id="kp-n" class="input" data-rec="note" maxlength="1000" autocomplete="off" placeholder="Không bắt buộc" /></div>
+          <button class="btn btn--primary" type="button" data-addrec-go>${icon('plus')} Ghi nhận</button>
+        </div>
         <p class="kp-hint faint">Nhập <strong>tổng giá trị tính đến ngày ghi</strong> (ảnh chụp), không phải phần tăng thêm. Ghi lại cùng ngày sẽ lấy giá trị mới nhất.</p>` : ''}
 
       <h3 class="kp-detail__h">Lịch sử <span class="num faint">${recs.length} lần ghi</span></h3>
@@ -531,6 +556,8 @@ export default async function kpiPage(root, { query }) {
         if (!(parseNum(v.target_value) > 0)) e.target_value = 'Mục tiêu phải là số lớn hơn 0.';
         if (!v.start_date) e.start_date = 'Chọn ngày bắt đầu.';
         if (v.end_date && v.start_date && v.end_date < v.start_date) e.end_date = 'Phải sau ngày bắt đầu.';
+        if (v.name && v.name.length > 120) e.name = 'Tối đa 120 ký tự.';
+        if (parseNum(v.target_value) > 9_999_999_999_999_999) e.target_value = 'Giá trị quá lớn.';
         return e;
       },
       async onSubmit(v) {
@@ -562,6 +589,7 @@ export default async function kpiPage(root, { query }) {
         const e = {};
         if (!Number.isFinite(parseNum(v.value))) e.value = 'Nhập một số.';
         if (!v.recorded_on) e.recorded_on = 'Chọn ngày.';
+        else if (v.recorded_on > today()) e.recorded_on = 'Không được chọn ngày trong tương lai.';
         return e;
       },
       async onSubmit(v) {
@@ -639,6 +667,7 @@ export default async function kpiPage(root, { query }) {
     } catch (err) { toast.error(err); btn.disabled = false; }
   }));
 
+  disposers.push(on(root, 'input', '.kp-quick [name=value]', (e, el) => el.removeAttribute('aria-invalid')));
   disposers.push(on(root, 'click', '[data-tab]', (e, el) => {
     tab = el.dataset.tab;
     setQuery({ tab: tab === 'active' ? null : tab });

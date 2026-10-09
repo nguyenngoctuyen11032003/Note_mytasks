@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseExpenseInput } from '../../src/services/smart/expenseParser.js';
+import { parseExpenseInput, parseShoppingInput } from '../../src/services/smart/expenseParser.js';
 
 // 2026-10-09 is a Friday.
 const today = '2026-10-09';
@@ -159,5 +159,108 @@ describe('parseExpenseInput — contract examples & combos', () => {
 
   it('NFD input', () => {
     expect(parse('cà phê 35k hôm qua'.normalize('NFD'))).toMatchObject({ amount: 35000, spent_on: '2026-10-08', description: 'cà phê' });
+  });
+});
+
+describe('parseExpenseInput — slang units (M4) and grouped k (M5)', () => {
+  it.each([
+    ['tiền nhà 5 củ', 5_000_000, 'tiền nhà'],
+    ['tiền nhà 5 cu', 5_000_000, 'tiền nhà'],
+    ['tiền nhà 5 củ rưỡi', 5_500_000, 'tiền nhà'],
+    ['mua điện thoại 2 xị', 200_000, 'mua điện thoại'],
+    ['taxi 2 trăm', 200_000, 'taxi'],
+    ['ăn tối 1 trăm rưỡi', 150_000, 'ăn tối'],
+    ['mua điện thoại 5 triệu rưỡi', 5_500_000, 'mua điện thoại'],
+    ['mua điện thoại 5tr rưỡi', 5_500_000, 'mua điện thoại'],
+    ['mua nhà 1 tỷ 2', 1_200_000_000, 'mua nhà'],
+    ['ăn trưa 1 triệu 2', 1_200_000, 'ăn trưa'],
+    ['laptop 1.250k', 1_250_000, 'laptop'],
+    ['laptop 1,250k', 1_250_000, 'laptop'],
+    ['xe 1.500tr', 1_500_000_000, 'xe'],
+  ])('%s → %i', (text, amount, description) => {
+    expect(parse(text)).toMatchObject({ amount, description });
+  });
+
+  it('"lít" is a volume, never money', () => {
+    expect(parse('xăng 1 lít')).toMatchObject({ amount: null, description: 'xăng 1 lít' });
+    expect(parse('xăng 2 lít 50k')).toMatchObject({ amount: 50_000, description: 'xăng 2 lít' });
+  });
+
+  it('a spaced tail digit followed by a quantity word stays out of the amount', () => {
+    expect(parse('vé 2 triệu 2 người')).toMatchObject({ amount: 2_000_000, description: 'vé 2 người' });
+  });
+});
+
+describe('parseExpenseInput — numbers that are part of a name (M6)', () => {
+  it.each([
+    'mua iPhone 15',
+    'Họp phòng 302',
+    'tiền điện tháng 9',
+    'Sách lớp 5',
+    'tivi 55 inch',
+    'ổ cứng 512 gb',
+    'Sinh nhật 20 tuổi',
+  ])('"%s" → amount null, number kept', (text) => {
+    expect(parse(text)).toMatchObject({ amount: null, description: text });
+  });
+
+  it('real amounts still work', () => {
+    expect(parse('phở 45')).toMatchObject({ amount: 45_000, description: 'phở' });
+    expect(parse('iPhone 15 25tr')).toMatchObject({ amount: 25_000_000, description: 'iPhone 15' });
+    expect(parse('tiền điện tháng 9 1tr2')).toMatchObject({ amount: 1_200_000, description: 'tiền điện tháng 9' });
+    expect(parse('khách sạn phòng 302 800k')).toMatchObject({ amount: 800_000, description: 'khách sạn phòng 302' });
+  });
+});
+
+describe('parseExpenseInput — low-severity edge cases', () => {
+  it('amount cap fits numeric(14,2)', () => {
+    expect(parse('x 1000 tỷ').amount).toBeNull();
+    expect(parse('x 999 tỷ').amount).toBe(999_000_000_000);
+  });
+
+  it('fractions are not dates', () => {
+    expect(parse('1/2 kg thịt 80k')).toMatchObject({ spent_on: today, amount: 80_000 });
+    expect(parse('cafe 30k 1/2')).toMatchObject({ spent_on: today, amount: 30_000 });
+  });
+
+  it('"1-1" is not a date; "01-10" still is', () => {
+    expect(parse('họp 1-1 50k').spent_on).toBe(today);
+    expect(parse('cơm 35k 01-10').spent_on).toBe('2026-10-01');
+  });
+
+  it('zero-width characters are stripped', () => {
+    expect(parse('​﻿')).toMatchObject({ description: '', amount: null });
+    expect(parse('cà​ phê 35k')).toMatchObject({ description: 'cà phê', amount: 35_000 });
+  });
+
+  it('today near 9999-12-31 never throws', () => {
+    expect(() => parse('cơm 35k thứ 2 tuần trước', { today: '9999-12-31' })).not.toThrow();
+    expect(() => parse('cơm 35k hôm qua', { today: '1900-01-01' })).not.toThrow();
+  });
+});
+
+describe('parseShoppingInput', () => {
+  it.each([
+    'Xiaomi 14',
+    'Giày size 42',
+    'tivi 55 inch',
+    'Bàn phím 87 phím',
+    'Sách tập 3',
+    'Win 11 key',
+    'Bút bi 0.5',
+    'Rau 15',
+  ])('"%s" → price null, number kept in the name', (text) => {
+    expect(parseShoppingInput(text)).toMatchObject({ name: text, unit_price: null, quantity: 1 });
+  });
+
+  it.each([
+    ['sữa tắm 120k x2', 'sữa tắm', 120_000, 2],
+    ['iPhone 15 25tr', 'iPhone 15', 25_000_000, 1],
+    ['nước mắm 35.000', 'nước mắm', 35_000, 1],
+    ['nước mắm 35000', 'nước mắm', 35_000, 1],
+    ['màn hình 27 inch 5tr', 'màn hình 27 inch', 5_000_000, 1],
+    ['Bút bi 5k x10', 'Bút bi', 5_000, 10],
+  ])('%s', (text, name, unit_price, quantity) => {
+    expect(parseShoppingInput(text)).toMatchObject({ name, unit_price, quantity });
   });
 });

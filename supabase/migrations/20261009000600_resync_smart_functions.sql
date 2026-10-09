@@ -106,6 +106,9 @@ $$;
 --              31 Mar: the anchor prevents drift to the 28th).
 -- If p_today is given and the occurrence is still before p_today, it rolls forward
 -- (occurrence by occurrence, so the rhythm is kept) until it is >= p_today.
+-- Body kept byte-identical to 20261009000800 (make_date instead of date_trunc on a
+-- date, which depends on the session TimeZone), so re-running this resync on its own
+-- never brings the non-IMMUTABLE version back.
 -- Pure function; granted to authenticated because the (SECURITY INVOKER) spawn
 -- trigger calls it as the signed-in user. It exposes no data.
 create or replace function public.recurrence_next_date(
@@ -152,7 +155,8 @@ begin
     elsif p_recurrence = 'weekly' then
       v := v + 7;
     else -- monthly
-      v_month := (date_trunc('month', v) + interval '1 month')::date;
+      v_month := (make_date(extract(year from v)::integer, extract(month from v)::integer, 1)
+                  + interval '1 month')::date;   -- pure date math: no timestamptz, no session TZ
       v_last  := extract(day from (v_month + interval '1 month' - interval '1 day'))::integer;
       v       := v_month + (least(v_anchor, v_last) - 1);
     end if;

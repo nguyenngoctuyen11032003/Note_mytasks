@@ -28,6 +28,21 @@ function writeJSON(key, v) {
   try { v == null ? localStorage.removeItem(key) : localStorage.setItem(key, JSON.stringify(v)); } catch {}
 }
 
+// Server clock − local clock (ms). started_at is stamped by Postgres now(), so a
+// device clock that runs behind would show 00:00 for several seconds after start.
+const SKEW_KEY = 'nm.clockSkew';
+let skew = Number(readJSON(SKEW_KEY, 0)) || 0;
+export function serverNow() { return Date.now() + skew; }
+/** Call around an RPC that returns a fresh server-stamped started_at. */
+function learnSkew(startedAt, t0, t1) {
+  const s = Date.parse(startedAt);
+  if (!Number.isFinite(s)) return;
+  const est = s - (t0 + t1) / 2;
+  // Ignore jitter within the request time; clamp absurd values.
+  skew = Math.abs(est) <= Math.max(500, (t1 - t0) / 2) ? 0 : Math.max(-600000, Math.min(600000, Math.round(est)));
+  writeJSON(SKEW_KEY, skew);
+}
+
 function readPaused() { return readJSON(KEY); }
 function writePaused(v) { writeJSON(KEY, v || null); }
 
@@ -55,9 +70,10 @@ export async function refreshRunning() {
 /** Start a fresh timer. Any running one is closed first. */
 export async function start({ taskId = null, description = null } = {}) {
   unlockAudio();
-  const cur = store.get().runningEntry;
-  if (cur) await stopEntry(cur);
+  // start_timer closes any running segment atomically on the server.
+  const t0 = Date.now();
   const e = await startEntry({ task_id: taskId, description });
+  learnSkew(e?.started_at, t0, Date.now());
   writePaused(null);
   if (pomo.enabled) setPomo({ phase: 'focus', base: 0, cycle: 0, breakEndsAt: null });
   store.set({ runningEntry: await withTask(e) });
@@ -94,7 +110,21 @@ export async function resume() {
   unlockAudio();
   const p = readPaused();
   if (!p) return;
-  const e = await startEntry({ task_id: p.task_id, description: p.description });
+  let e;
+  try {
+    const t0 = Date.now();
+    e = await startEntry({ task_id: p.task_id, description: p.description });
+    learnSkew(e?.started_at, t0, Date.now());
+  } catch (err) {
+    // The task was completed, cancelled or deleted while paused: the session cannot continue.
+    if (err?.code === 'task_closed' || err?.code === 'not_found') {
+      writePaused(null);
+      setPomo({ phase: 'idle', base: 0, cycle: 0, breakEndsAt: null });
+      syncTicker();
+      tickers.forEach((fn) => fn());
+    }
+    throw err;
+  }
   if (pomo.enabled && pomo.phase !== 'focus') setPomo({ phase: 'focus', base: p.seconds || 0, breakEndsAt: null });
   store.set({ runningEntry: await withTask(e) });
   syncTicker();
@@ -122,7 +152,7 @@ export function sessionSeconds() {
   const p = readPaused();
   const carried = p && cur && p.task_id === cur.task_id ? p.seconds || 0 : 0;
   if (!cur) return p?.seconds || 0;
-  return carried + Math.max(0, Math.floor((Date.now() - new Date(cur.started_at).getTime()) / 1000));
+  return carried + Math.max(0, Math.floor((serverNow() - new Date(cur.started_at).getTime()) / 1000));
 }
 
 export function onTick(fn) {
@@ -281,7 +311,7 @@ function reconcilePomodoro() {
   const paused = readPaused();
   if (run && pomo.phase !== 'focus') {
     // A timer was started elsewhere (another device / tab) — treat it as focus.
-    const segment = Math.max(0, Math.floor((Date.now() - Date.parse(run.started_at)) / 1000));
+    const segment = Math.max(0, Math.floor((serverNow() - Date.parse(run.started_at)) / 1000));
     setPomo({ phase: 'focus', base: Math.max(0, sessionSeconds() - segment), breakEndsAt: null });
   } else if (!run && !paused && pomo.phase !== 'idle' && pomo.phase !== 'break') {
     setPomo({ phase: 'idle', base: 0, cycle: 0, breakEndsAt: null });
@@ -301,13 +331,13 @@ function checkPhase() {
 async function completeFocus({ overrun = 0, manual = false } = {}) {
   busy = true;
   try {
-    const endAt = Date.now() - overrun * 1000;
+    const endAt = serverNow() - overrun * 1000;
     if (store.get().runningEntry) await closeSegment(overrun > 3 ? endAt : null);
     const cycle = (pomo.cycle || 0) + 1;
     const long = cycle % cfg.every === 0;
     const mins = long ? cfg.long : cfg.short;
     // A long sleep may already have consumed the break; checkPhase handles it.
-    setPomo({ phase: 'break', cycle, breakKind: long ? 'long' : 'short', breakTotal: mins * 60, breakEndsAt: (manual ? Date.now() : endAt) + mins * 60000 });
+    setPomo({ phase: 'break', cycle, breakKind: long ? 'long' : 'short', breakTotal: mins * 60, breakEndsAt: (manual ? Date.now() : endAt - skew) + mins * 60000 });
     if (!manual) bumpLog();
     if (!manual) {
       chime('focus');
@@ -418,5 +448,17 @@ function updateTitle() {
 
 if (typeof document !== 'undefined') {
   // Background tabs throttle timers: catch up as soon as the tab is visible again.
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') tick(); });
+  // Also re-read the running segment (it may have been stopped/started on another device).
+  let lastSync = Date.now();
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    tick();
+    if (store.get().session && Date.now() - lastSync > 30000) {
+      lastSync = Date.now();
+      const before = store.get().runningEntry?.id || null;
+      refreshRunning().then((now) => {
+        if ((now?.id || null) !== before) tickers.forEach((fn) => fn());
+      }).catch(() => {});
+    }
+  });
 }

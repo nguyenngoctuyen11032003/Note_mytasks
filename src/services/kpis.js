@@ -61,6 +61,20 @@ export async function createKpi(input) {
 export async function updateKpi(id, patch) {
   requireId(id);
   const row = requireNonEmpty(validateKpi(patch, { partial: true }));
+  // Only one bound sent: check it against the stored other bound so the error
+  // names the field (the DB CHECK would only say "invalid input").
+  if (('end_date' in row && row.end_date && !('start_date' in row)) || ('start_date' in row && !('end_date' in row))) {
+    const cur = await run(db().from('kpis').select('start_date, end_date').eq('id', id).maybeSingle());
+    if (cur) {
+      const start = row.start_date ?? cur.start_date;
+      const end = 'end_date' in row ? row.end_date : cur.end_date;
+      if (start && end && end < start) {
+        throw 'end_date' in row
+          ? invalid('end_date', 'Ngày kết thúc phải sau hoặc bằng ngày bắt đầu.')
+          : invalid('start_date', 'Ngày bắt đầu phải trước hoặc bằng ngày kết thúc.');
+      }
+    }
+  }
   return normKpi(await run(db().from('kpis').update(row).eq('id', id).select(KPI_COLS).single()));
 }
 
@@ -70,11 +84,20 @@ export async function deleteKpi(id) {
   return true;
 }
 
+const PAGE = 1000; // PostgREST max_rows
+
 export async function listRecords(kpiId) {
   requireId(kpiId, 'kpi_id');
-  const q = db().from('kpi_records').select(RECORD_COLS).eq('kpi_id', kpiId)
-    .order('recorded_on', { ascending: true }).order('created_at', { ascending: true });
-  return normRec(await run(q));
+  const out = [];
+  for (let from = 0; ; from += PAGE) {
+    const q = db().from('kpi_records').select(RECORD_COLS).eq('kpi_id', kpiId)
+      .order('recorded_on', { ascending: true }).order('created_at', { ascending: true }).order('id', { ascending: true })
+      .range(from, from + PAGE - 1);
+    const rows = (await run(q)) || [];
+    out.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return normRec(out);
 }
 
 /**
@@ -92,10 +115,22 @@ export async function addRecord(kpiId, input) {
 }
 
 /** All records (optionally since a day) — for charts. */
+const REC_PAGE = 1000; // PostgREST max_rows
+const REC_CAP = 10000;
 export async function listAllRecords(sinceDay) {
   let q = db().from('kpi_records').select(RECORD_COLS);
   if (sinceDay) q = q.gte('recorded_on', vDay(sinceDay, 'sinceDay'));
-  return normRec(await run(q.order('recorded_on', { ascending: true }).limit(5000)));
+  // Newest first so a cap would drop the oldest history, never the latest snapshot.
+  q = q.order('recorded_on', { ascending: false }).order('created_at', { ascending: false }).order('id', { ascending: true });
+  // PostgREST caps each response at max_rows: page so nothing is silently dropped.
+  const out = [];
+  while (out.length < REC_CAP) {
+    const want = Math.min(REC_PAGE, REC_CAP - out.length);
+    const rows = (await run(q.range(out.length, out.length + want - 1))) || [];
+    out.push(...rows);
+    if (rows.length < want) break;
+  }
+  return normRec(out.reverse());
 }
 
 export async function updateRecord(id, patch) {

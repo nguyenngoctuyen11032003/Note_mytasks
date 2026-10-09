@@ -170,7 +170,7 @@
   }
   .shell.nav-open .sidebar { transform: none; }
   .scrim {
-    display: block; position: fixed; inset: 0; z-index: 25; background: rgba(20, 16, 12, 0.36);
+    display: block; position: fixed; inset: 0; z-index: 25; background: color-mix(in srgb, var(--surface-sunk) 50%, transparent);
     opacity: 0; pointer-events: none; transition: opacity var(--t-med);
   }
   .shell.nav-open .scrim { opacity: 1; pointer-events: auto; }
@@ -203,19 +203,19 @@
   padding: var(--s-8) var(--s-9);
   display: flex; flex-direction: column; justify-content: space-between;
 }
-:root[data-theme='dark'] .auth__plate { background: #0d0b09; color: #efe8db; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) .auth__plate { background: #0d0b09; color: #efe8db; } }
+:root[data-theme='dark'] .auth__plate { background: var(--surface-sunk); color: var(--ink); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) .auth__plate { background: var(--surface-sunk); color: var(--ink); } }
 .auth__plate .brand { color: inherit; padding: 0; }
 .auth__plate .brand__mark { border-color: currentColor; color: inherit; }
 .auth__plate .brand__mark::after { border-color: var(--ink); }
-.auth__plate .brand__sub { color: rgba(243, 237, 226, 0.5); }
+.auth__plate .brand__sub { color: color-mix(in srgb, currentColor 50%, transparent); }
 .auth__drawing { position: absolute; inset: 0; pointer-events: none; opacity: 0.9; }
 .auth__drawing svg { width: 100%; height: 100%; }
 .auth__quote { position: relative; max-width: 30ch; }
 .auth__quote p { font-family: var(--font-display); font-weight: 300; font-size: clamp(28px, 3.2vw, 46px); line-height: 1.08; letter-spacing: -0.02em; }
-.auth__quote p em { color: #e58a5e; }
-.auth__quote span { display: block; margin-top: var(--s-5); font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.16em; text-transform: uppercase; color: rgba(243, 237, 226, 0.55); }
-.auth__legend { position: relative; display: flex; gap: var(--s-6); font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.12em; text-transform: uppercase; color: rgba(243, 237, 226, 0.5); }
+.auth__quote p em { color: var(--accent-ink); }
+.auth__quote span { display: block; margin-top: var(--s-5); font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.16em; text-transform: uppercase; color: color-mix(in srgb, currentColor 55%, transparent); }
+.auth__legend { position: relative; display: flex; gap: var(--s-6); font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.12em; text-transform: uppercase; color: color-mix(in srgb, currentColor 50%, transparent); }
 
 .auth__side { display: grid; place-items: center; padding: var(--s-8) var(--s-6); }
 .auth__card { width: 100%; max-width: 420px; }

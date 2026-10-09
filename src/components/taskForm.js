@@ -54,7 +54,7 @@ export function openTaskForm({ task = null, defaults = {}, onSaved, onDeleted } 
         ${field({ label: 'Hạn chót', name: 'due_date', optional: true, control: input('due_date', t.due_date, 'type="date"') })}
       </div>
       <div class="form-row">
-        ${field({ label: 'Ước tính (phút)', name: 'estimated_minutes', optional: true, control: input('estimated_minutes', est, 'type="number" min="0" step="5" inputmode="numeric"') })}
+        ${field({ label: 'Ước tính (phút)', name: 'estimated_minutes', optional: true, control: input('estimated_minutes', est, 'type="number" min="0" max="100000" step="5" inputmode="numeric" placeholder="vd: 30"') })}
         ${field({ label: 'Lặp lại', name: 'recurrence', optional: true, control: select('recurrence', [{ value: '', label: 'Không lặp' }, ...Object.entries(RECURRENCE_LABELS).map(([v, l]) => ({ value: v, label: l }))], t.recurrence || '') })}
       </div>
       <div class="tk-presets" role="group" aria-label="Ước tính nhanh">
@@ -76,7 +76,13 @@ export function openTaskForm({ task = null, defaults = {}, onSaved, onDeleted } 
       const e = {};
       if (!v.title) e.title = 'Hãy nhập tiêu đề.';
       else if (v.title.length > 200) e.title = 'Tối đa 200 ký tự.';
-      if (v.estimated_minutes !== '' && (!Number.isInteger(Number(v.estimated_minutes)) || Number(v.estimated_minutes) < 0)) e.estimated_minutes = 'Nhập số phút ≥ 0.';
+      if (v.estimated_minutes !== '') {
+        const n = Number(v.estimated_minutes);
+        if (!Number.isInteger(n) || n < 0) e.estimated_minutes = 'Nhập số phút nguyên ≥ 0.';
+        else if (n > 100000) e.estimated_minutes = 'Tối đa 100.000 phút.';
+      }
+      if (v.due_date && !/^\d{4}-\d{2}-\d{2}$/.test(v.due_date)) e.due_date = 'Ngày không hợp lệ.';
+      if ((v.description || '').length > 5000) e.description = 'Tối đa 5.000 ký tự.';
       return e;
     },
     async onSubmit(v) {

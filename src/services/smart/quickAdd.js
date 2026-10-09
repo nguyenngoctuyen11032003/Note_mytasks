@@ -46,7 +46,7 @@
 
 import { addDays, weekday, endOfMonth, startOfMonth, addMonths } from '../../utils/date.js';
 import {
-  Scanner, B, E, accentOk, normalizeVi, isoDay, validYmd, mondayOf, resolveToday,
+  Scanner, B, E, accentOk, normalizeVi, isoDay, validYmd, mondayOf, resolveToday, safeDay, notADate,
 } from './text.js';
 
 const MAX_TAGS = 20;
@@ -99,13 +99,15 @@ const DATE_RULES = [
     },
   },
   {
-    re: `(?<![\\p{L}\\p{N}/])(?:(?:vao|han|deadline)\\s+)?(?:ngay\\s+)?(\\d{1,2})[/-](\\d{1,2})(?:[/-](\\d{4}|\\d{2}))?(?![\\p{L}\\p{N}/-])`,
-    fn(m, today) {
-      const d = +m[1], mo = +m[2];
-      if (m[3]) {
-        const y = m[3].length === 2 ? 2000 + +m[3] : +m[3];
+    re: `(?<![\\p{L}\\p{N}/.,])(?:((?:vao|han|deadline)\\s+)?(ngay\\s+)?)(\\d{1,2})([/-])(\\d{1,2})(?:[/-](\\d{4}|\\d{2}))?(?![\\p{L}\\p{N}/-]|[.,]\\d)`,
+    fn(m, today, sc) {
+      const d = +m[3], mo = +m[5];
+      if (m[6]) {
+        const y = m[6].length === 2 ? 2000 + +m[6] : +m[6];
         return validYmd(y, mo, d) ? isoDay(y, mo, d) : null;
       }
+      const after = sc.folded.slice(m.index + m[0].length);
+      if (notADate({ d: m[3], m: m[5], sep: m[4], prefixed: !!(m[1] || m[2]), after })) return null;
       const y0 = +today.slice(0, 4);
       for (let y = y0; y <= y0 + 8; y++) {
         if (validYmd(y, mo, d) && isoDay(y, mo, d) >= today) return isoDay(y, mo, d);
@@ -155,6 +157,19 @@ const DATE_RULES = [
     fn: (m, today) => today,
   },
   {
+    // "ngày 15 tháng 11", "mùng 2 tháng 1 năm 2028", "ngày 2 tháng 1 2028"
+    re: `${B}(?:ngay|mung|mong)\\s+(\\d{1,2})\\s+thang\\s+(\\d{1,2})(?:\\s+(?:nam\\s+)?(\\d{4}))?${E}`,
+    fn(m, today) {
+      const d = +m[1], mo = +m[2];
+      if (m[3]) return validYmd(+m[3], mo, d) ? isoDay(+m[3], mo, d) : null;
+      const y0 = +today.slice(0, 4);
+      for (let y = y0; y <= y0 + 8; y++) {
+        if (validYmd(y, mo, d) && isoDay(y, mo, d) >= today) return isoDay(y, mo, d);
+      }
+      return null;
+    },
+  },
+  {
     re: `${B}ngay\\s+(\\d{1,2})(?![\\p{L}\\p{N}/-])`,
     fn(m, today) {
       const d = +m[1];
@@ -168,13 +183,26 @@ const DATE_RULES = [
   },
 ];
 
+// "tối thứ 7", "chiều t3", "sáng 20/10": the part of day before a date belongs to it.
+// Not after "ăn/bữa/buổi/ca…" ("ăn tối thứ 7" = dinner on Saturday).
+const PART_BEFORE_DATE = /(?<![\p{L}\p{N}])(sang|trua|chieu|toi|dem)\s+$/u;
+const PART_KEEP_PREV = new Set(['an', 'bua', 'buoi', 'ca', 'com', 'tiec']);
+
+function absorbPartOfDay(sc, index) {
+  const pm = PART_BEFORE_DATE.exec(sc.masked.slice(0, index));
+  if (!pm || !accentOk(sc.orig(pm.index, pm.index + pm[1].length))) return;
+  if (PART_KEEP_PREV.has(sc.before(pm.index).split(/\s+/).pop())) return;
+  sc.consume(pm.index, pm.index + pm[1].length);
+}
+
 function parseDate(sc, today) {
   for (const rule of DATE_RULES) {
     for (const m of sc.matches(rule.re)) {
       if (!accentOk(sc.orig(m.index, m.index + m[0].length))) continue;
-      const day = rule.fn(m, today, sc);
+      const day = safeDay(() => rule.fn(m, today, sc));
       if (day) {
         sc.take(m);
+        absorbPartOfDay(sc, m.index);
         return day;
       }
     }
@@ -207,7 +235,7 @@ function parseRecurrence(sc, today) {
       if (/ngay$/.test(m[0]) && /^(?:mai|kia|mot|nay)(?![\p{L}\p{N}])/u.test(sc.after(end))) continue;
       if (/^hang\s/.test(m[0]) && HANG_NOUN_PREV.has(sc.before(m.index).split(/\s+/).pop())) continue;
       sc.take(m);
-      const due = rule.weekdayGroup ? upcoming(today, wdIndex(m, rule.weekdayGroup), true) : null;
+      const due = rule.weekdayGroup ? safeDay(() => upcoming(today, wdIndex(m, rule.weekdayGroup), true)) : null;
       return { recurrence: rule.value, due };
     }
   }
@@ -241,68 +269,153 @@ function parsePriority(sc) {
   return best;
 }
 
-// ---- duration ----------------------------------------------------------------------
+// ---- hours: clock time vs duration -------------------------------------------------
+//
+// One token grammar for "N h|g|giờ|tiếng [MM [p|phút]] [rưỡi]" (+ optional leading "~"),
+// classified by context:
+// - DURATION: "~…" (explicit estimate), "N tiếng" (+ "rưỡi"), an explicit minute unit
+//   ("1h30m", "1g30p", "1h 15p"), a decimal ("1.5h", "1,5h"), or N ≤ 4 without any time
+//   context ("làm 2h", "code 3h"); also N ≥ 24 ("trực 24h"; > 24h is rejected).
+// - CLOCK TIME (due_time, kept in the title): after "lúc/vào/từ/đến/trước/sau/at", next to
+//   a part of day ("9h sáng", "chiều nay 3h") or a date ("mai 10h", "15h hôm nay",
+//   "14h ngày 20/10", "mỗi ngày 8h"), or when 5 ≤ N ≤ 23 ("họp 15h", "gặp khách 10h30",
+//   "9 giờ 30"). A bare "Ng" with N ≥ 5 and no context is ignored ("5g" may be grams).
+// - "14:30", "9pm", "9:15 am" are always clock times.
 
-const H_UNIT = '(?:h|g|hr|hrs|\\s*(?:gio|tieng))';
-const M_UNIT = '(?:p|ph|m|min|mins|\\s*(?:phut|ph))';
-const DURATION_RULES = [
-  { re: `${B}(\\d{1,2})${H_UNIT}\\s*(\\d{1,2})${M_UNIT}?${E}`, hours: true, fn: (m) => (+m[2] < 60 ? +m[1] * 60 + +m[2] : null) },
-  { re: `${B}(\\d{1,2}(?:[.,]\\d{1,2})?)${H_UNIT}${E}`, hours: true, fn: (m) => Math.round(parseFloat(m[1].replace(',', '.')) * 60) },
-  { re: `${B}(\\d{1,4})${M_UNIT}${E}`, hours: false, fn: (m) => +m[1] },
-];
+const MIN_UNIT = '(?:phut|ph|p|mins|min|m)';
+// minutes written after a space without a unit must not be a count ("9h 30 người")
+const NOT_COUNT = '(?!\\s*(?:nguoi|cai|ly|lan|trang|bai|chuong|phan|mon|km|kg|ngay|tuan|thang|nam))';
+const HOUR_TOKEN = `(~\\s*)?(?<![\\p{L}\\p{N}.,:])(\\d{1,2}(?:[.,]\\d{1,2})?)(?:(h|g|hr|hrs)|\\s*(gio|tieng))` +
+  `(?:(\\d{1,2})(?!\\p{N})\\s*(${MIN_UNIT})?|\\s*(\\d{1,2})\\s*(${MIN_UNIT})|\\s+(\\d{2})${NOT_COUNT}(?![\\p{L}\\p{N}]|\\s*[/\\-.:,]\\s*\\d)|\\s+(ruoi))?${E}`;
+const COLON_TIME = `(?<![\\p{L}\\p{N}.,:])(\\d{1,2}):(\\d{2})(?:\\s*(am|pm))?${E}`;
+const AMPM_TIME = `${B}(\\d{1,2})\\s*(am|pm)${E}`;
+const EXPLICIT_MINUTES = `~\\s*(\\d{1,4})\\s*${MIN_UNIT}?${E}`;
+const MINUTES_ONLY = `${B}(\\d{1,4})(?:(p|ph|m|min|mins)|\\s*(phut|ph))${E}`;
+
 const TIME_OF_DAY_BEFORE = /(?:^|\s)(?:luc|vao|tu|den|truoc|sau|at)$/;
-// A bare hour directly after a date word ("mai 9h", "thứ 6 14h", "12/10 9h") = time of day.
-// Checked on the UNMASKED folded text (date words may already be consumed).
-const DATE_WORD_BEFORE = /(?:^|\s)(?:mai|nay|kia|mot|cn|nhat|thu\s*[2-7]|t[2-7]|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)$/;
-const foldedBefore = (sc, i) => sc.folded.slice(0, i).replace(/\s+$/, '');
-const EXPLICIT_DURATION = [
-  { re: `~\\s*(\\d{1,2})${H_UNIT}\\s*(\\d{1,2})${M_UNIT}?${E}`, fn: (m) => (+m[2] < 60 ? +m[1] * 60 + +m[2] : null) },
-  { re: `~\\s*(\\d{1,2}(?:[.,]\\d{1,2})?)${H_UNIT}${E}`, fn: (m) => Math.round(parseFloat(m[1].replace(',', '.')) * 60) },
-  { re: `~\\s*(\\d{1,4})${M_UNIT}?${E}`, fn: (m) => +m[1] },
-];
-const TIME_OF_DAY_AFTER = /^(?:sang|trua|chieu|toi|dem|am|pm)(?![\p{L}\p{N}])/u;
+// A date word right before the hour ("mai 9h", "thứ 6 14h", "12/10 9h", "mỗi ngày 8h").
+const DATE_WORD_BEFORE = /(?:^|\s)(?:mai|nay|kia|mot|cn|nhat|hnay|thu\s*(?:[2-7]|hai|ba|tu|nam|sau|bay)|t[2-7]|(?:moi|hang)\s+(?:ngay|sang|trua|chieu|toi|dem)|ngay\s+\d{1,2}|thang\s+\d{1,2}|nam\s+\d{4}|tuan\s+(?:sau|toi|nay)|cuoi\s+tuan|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)$/;
+const DATE_WORD_AFTER = /^(?:mai|nay|kia|mot|hnay|hom\s+nay|ngay\s+(?:mai|kia|mot|\d{1,2})|thu\s*(?:[2-7]|hai|ba|tu|nam|sau|bay)|t[2-7]|cn|chu\s*nhat|\d{1,2}[/-]\d{1,2}|tuan\s+(?:sau|toi|nay)|cuoi\s+tuan|(?:sang|trua|chieu|toi|dem)\s+(?:nay|mai))(?![\p{L}\p{N}])/u;
+const PART_AFTER = /^(sang|trua|chieu|toi|dem)(?![\p{L}\p{N}])/u;
+const PART_BEFORE = /(?:^|\s)(sang|trua|chieu|toi|dem)(?:\s+(?:nay|mai|qua))?$/;
 
-function parseDuration(sc) {
-  for (const rule of EXPLICIT_DURATION) {
-    for (const m of sc.matches(rule.re)) {
-      const minutes = rule.fn(m);
-      if (!minutes || minutes < 1 || minutes > 24 * 60) continue;
-      sc.take(m);
-      return minutes;
-    }
-  }
-  for (const rule of DURATION_RULES) {
-    for (const m of sc.matches(rule.re)) {
-      if (!accentOk(sc.orig(m.index, m.index + m[0].length))) continue;
-      if (rule.hours) {
-        if (TIME_OF_DAY_BEFORE.test(sc.before(m.index)) || DATE_WORD_BEFORE.test(foldedBefore(sc, m.index))) continue;
-        if (TIME_OF_DAY_AFTER.test(sc.after(m.index + m[0].length))) continue;
-      }
-      const minutes = rule.fn(m);
-      if (!minutes || minutes < 1 || minutes > 24 * 60) continue;
-      sc.take(m);
-      return minutes;
-    }
-  }
-  return null;
+/** Folded UNMASKED text around a span (date/recurrence words may already be consumed). */
+const foldedBefore = (sc, i) => sc.folded.slice(0, i).replace(/\s+$/, '');
+function foldedAfter(sc, end) {
+  const raw = sc.folded.slice(end);
+  const trimmed = raw.replace(/^\s+/, '');
+  return { text: trimmed, start: end + raw.length - trimmed.length };
+}
+/** Context regex hit whose original spelling is acceptable ("mãi" ≠ "mai"). */
+function ctxAfter(sc, end, re) {
+  const { text, start } = foldedAfter(sc, end);
+  const m = re.exec(text);
+  return m && accentOk(sc.orig(start, start + m[0].length)) ? m : null;
+}
+function ctxBefore(sc, index, re) {
+  const before = foldedBefore(sc, index);
+  const m = re.exec(before);
+  return m && accentOk(sc.orig(m.index, before.length)) ? m : null;
 }
 
-// ---- time of day (reported, never consumed) ----------------------------------------
+function applyPart(h, part) {
+  if (part === 'chieu' || part === 'pm') return h < 12 ? h + 12 : h;
+  if (part === 'toi') return h < 12 ? h + 12 : 0; // "12h tối" ≈ midnight
+  if (part === 'dem') return h === 12 ? 0 : h >= 6 && h < 12 ? h + 12 : h; // "11h đêm" = 23h, "2h đêm" = 2h
+  if (part === 'trua') return h < 6 ? h + 12 : h; // "1h trưa" = 13h
+  if (part === 'sang' || part === 'am') return h === 12 ? 0 : h;
+  return h;
+}
+const hhmm = (h, min) => `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
 
-const TOD_RE = `${B}(?:(luc|vao)\\s+)?(\\d{1,2})(?:(?:h|g|\\s*gio)(\\d{2})?|:(\\d{2}))(?:\\s*(sang|trua|chieu|toi|dem|am|pm))?${E}`;
+/** Part of day given right after the time, or right before it ("chiều nay 3h"). */
+function partOfDay(sc, start, end) {
+  const a = ctxAfter(sc, end, PART_AFTER);
+  if (a) return a[1];
+  const b = ctxBefore(sc, start, PART_BEFORE);
+  return b ? b[1] : null;
+}
 
+/**
+ * Classify one HOUR_TOKEN match.
+ * @returns {{kind: 'clock', time: string} | {kind: 'duration', minutes: number} | null}
+ */
+function classifyHour(sc, m) {
+  const start = m.index + (m[1] ? m[1].length : 0);
+  const end = m.index + m[0].length;
+  if (!accentOk(sc.orig(start, end))) return null;
+  const [, tilde, num, hUnit, wUnit, mm1, mu1, mm2, mu2, mm3, half] = m;
+  const unit = hUnit || wUnit;
+  const minStr = mm1 ?? mm2 ?? mm3;
+  const min = minStr != null ? +minStr : half ? 30 : 0;
+  if (min > 59) return null;
+  const decimal = /[.,]/.test(num);
+  const n = decimal ? parseFloat(num.replace(',', '.')) : +num;
+  const duration = () => {
+    const minutes = decimal ? Math.round(n * 60) : n * 60 + min;
+    return minutes >= 1 && minutes <= 24 * 60 ? { kind: 'duration', minutes } : null;
+  };
+  if (tilde || decimal || unit === 'tieng' || mu1 || mu2) return duration();
+
+  const clock = () => {
+    if (n > 23) return null;
+    return { kind: 'clock', time: hhmm(applyPart(n, partOfDay(sc, start, end)), min) };
+  };
+  const cue = TIME_OF_DAY_BEFORE.test(foldedBefore(sc, start)) ||
+    ctxAfter(sc, end, PART_AFTER) || ctxBefore(sc, start, PART_BEFORE) ||
+    ctxBefore(sc, start, DATE_WORD_BEFORE) || ctxAfter(sc, end, DATE_WORD_AFTER);
+  if (cue) return clock();
+  if (n >= 24) return duration();
+  if (n >= 5) return unit === 'g' && minStr == null ? null : clock();
+  return duration();
+}
+
+/** Earliest clock time in the text, 'HH:MM' or null. Reported only — never consumed. */
 function parseTimeOfDay(sc) {
-  for (const m of sc.matches(TOD_RE)) {
-    let h = +m[2];
-    const min = +(m[3] ?? m[4] ?? 0);
-    const part = m[5];
-    const before = foldedBefore(sc, m.index); // date words are masked by now
-    const cue = m[1] || part || m[4] != null || TIME_OF_DAY_BEFORE.test(before) || DATE_WORD_BEFORE.test(before);
-    if (!cue || h > 23 || min > 59) continue;
-    if ((part === 'chieu' || part === 'toi' || part === 'pm') && h < 12) h += 12;
-    if (part === 'dem' && h >= 6 && h < 12) h += 12;
-    if ((part === 'am' || part === 'sang') && h === 12) h = 0;
-    return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+  const found = [];
+  for (const m of sc.matches(HOUR_TOKEN)) {
+    if (m[1]) continue;
+    const c = classifyHour(sc, m);
+    if (c && c.kind === 'clock') { found.push({ i: m.index, time: c.time }); break; }
+  }
+  for (const m of sc.matches(COLON_TIME)) {
+    const h = +m[1], min = +m[2];
+    if (h > 23 || min > 59) continue;
+    const part = m[3] || partOfDay(sc, m.index, m.index + m[0].length);
+    found.push({ i: m.index, time: hhmm(applyPart(h, part), min) });
+    break;
+  }
+  for (const m of sc.matches(AMPM_TIME)) {
+    const h = +m[1];
+    if (h < 1 || h > 12) continue;
+    found.push({ i: m.index, time: hhmm(applyPart(h, m[2]), 0) });
+    break;
+  }
+  found.sort((a, b) => a.i - b.i);
+  return found.length ? found[0].time : null;
+}
+
+function parseDuration(sc) {
+  // 1. explicit estimate "~2h", "~1g30", "~30p", "~45" always wins
+  for (const m of sc.matches(HOUR_TOKEN)) {
+    if (!m[1]) continue;
+    const c = classifyHour(sc, m);
+    if (c && c.kind === 'duration') { sc.take(m); return c.minutes; }
+  }
+  for (const m of sc.matches(EXPLICIT_MINUTES)) {
+    const minutes = +m[1];
+    if (minutes >= 1 && minutes <= 24 * 60) { sc.take(m); return minutes; }
+  }
+  // 2. bare hours that read as a duration, then minutes ("30p", "45 phút")
+  for (const m of sc.matches(HOUR_TOKEN)) {
+    if (m[1]) continue;
+    const c = classifyHour(sc, m);
+    if (c && c.kind === 'duration') { sc.take(m); return c.minutes; }
+  }
+  for (const m of sc.matches(MINUTES_ONLY)) {
+    if (!accentOk(sc.orig(m.index, m.index + m[0].length))) continue;
+    const minutes = +m[1];
+    if (minutes >= 1 && minutes <= 24 * 60) { sc.take(m); return minutes; }
   }
   return null;
 }

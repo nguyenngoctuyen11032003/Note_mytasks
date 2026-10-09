@@ -212,3 +212,72 @@ describe('buildInsights — ordering & limit', () => {
     expect(buildInsights(everything)).toEqual(buildInsights(everything));
   });
 });
+
+describe('buildInsights — robustness (M8)', () => {
+  const BAD = /NaN|undefined|null|Infinity|\[object/;
+  const check = (xs) => {
+    expect(Array.isArray(xs)).toBe(true);
+    for (const x of xs) {
+      expect(x.title).not.toMatch(BAD);
+      expect(x.detail).not.toMatch(BAD);
+      expect(x.id).not.toMatch(/undefined|null/);
+    }
+    return xs;
+  };
+
+  it('never throws on garbage input', () => {
+    expect(buildInsights(null)).toEqual([]);
+    expect(buildInsights('x')).toEqual([]);
+    check(buildInsights({ anomalies: [{ expense_id: 'e', amount: 100, baseline: 10, spent_on: 20261001 }] }));
+    check(buildInsights({ anomalies: [{ expense_id: 'e', amount: 100, baseline: 10, spent_on: new Date() }] }));
+    check(buildInsights({ kpis: [{ kpi_id: 'k', name: 'Doanh số', status: 'at_risk', projected_value: 50, target_value: null, unit: 'đơn' }] }));
+    check(buildInsights({ summary: 'x', budgets: 'x', kpis: 5, anomalies: {}, productivity: 'x', spending: 3, limit: 'abc' }));
+  });
+
+  it('KPI without a name → "KPI không tên"', () => {
+    const [x] = check(buildInsights({ kpis: [{ kpi_id: 'k', name: null, status: 'achieved' }] }));
+    expect(x.title).toContain('KPI không tên');
+  });
+
+  it('stable, distinct ids when expense_id / kpi_id are missing', () => {
+    const a = check(buildInsights({ anomalies: [{ amount: 100, baseline: 10 }, { amount: 200, baseline: 10 }] }));
+    expect(a).toHaveLength(2);
+    expect(new Set(ids(a)).size).toBe(2);
+    expect(ids(a)).toEqual(ids(buildInsights({ anomalies: [{ amount: 100, baseline: 10 }, { amount: 200, baseline: 10 }] })));
+    const k = check(buildInsights({ kpis: [{ name: 'A', status: 'achieved' }, { name: 'B', status: 'achieved' }] }));
+    expect(k).toHaveLength(2);
+  });
+
+  it('anomalies with ratio ≤ 1 or non-positive amounts are skipped', () => {
+    expect(buildInsights({ anomalies: [{ expense_id: 'e', amount: 2, baseline: 10, category_name: 'X' }] })).toEqual([]);
+    expect(buildInsights({ anomalies: [{ expense_id: 'e', amount: -5, baseline: 10 }] })).toEqual([]);
+  });
+
+  it('percentages are clamped to 0–999 and counts rounded', () => {
+    const [p] = check(buildInsights({ spending: { change_pct: 1e20 } }));
+    expect(p.title).toContain('999%');
+    const [k] = check(buildInsights({ kpis: [{ kpi_id: 'k', name: 'A', status: 'off_track', progress_pct: 1e20, expected_pct: -3 }] }));
+    expect(k.detail).toContain('999%');
+    expect(k.detail).toContain(' 0%');
+    expect(buildInsights({ summary: { tasks: { overdue: 2.5 } } })[0].title).toMatch(/^3 /);
+    expect(buildInsights({ summary: { kpis: { off_track: 1.7 } } })[0].title).toMatch(/^2 /);
+    const [r] = check(buildInsights({ productivity: { on_time_rate: -5 } }));
+    expect(r.title).not.toMatch(/-\d/);
+  });
+
+  it('never says "vượt -X": over only when spent > budget', () => {
+    const xs = check(buildInsights({ budgets: [
+      { category_id: 'c', category_name: 'Ăn', budget: 100, spent: 50, status: 'over' },
+      { category_id: null, budget: 100, spent: 50, status: 'over' },
+      { category_id: 'd', category_name: 'Đi', budget: 100, spent: null, status: 'over' },
+    ] }));
+    for (const x of xs) expect(x.detail).not.toMatch(/vượt -/);
+    expect(ids(xs)).not.toContain('budget_over_c');
+    expect(ids(xs)).not.toContain('budget_over_total');
+  });
+
+  it('negative totals are not printed', () => {
+    const [x] = check(buildInsights({ spending: { change_pct: 60, total: -100, prev_total: 0 } }));
+    expect(x.detail).not.toMatch(/-\d/);
+  });
+});

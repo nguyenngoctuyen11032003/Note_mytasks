@@ -2,7 +2,7 @@
 // Server-owned columns (user_id, search, created_at, updated_at) are never sent.
 import {
   db, run, invalid, pick, requireId, requireNonEmpty, vText, vEnum, vColor, vUuidOrNull, vInstant,
-  searchOr, orValue,
+  searchOr, orValue, fetchPaged,
 } from './errors.js';
 import { normalizeTags, tagFilterValue } from './tasks.js';
 
@@ -51,7 +51,8 @@ export function toPrefixQuery(text) {
  * @param {boolean} [f.trashed=false]
  * @param {number} [f.limit=500]
  */
-export async function listNotes({ search, notebook, tag, kind, pinned, archived = false, trashed = false, limit } = {}) {
+export async function listNotes(filters = {}) {
+  const { search, notebook, tag, kind, pinned, archived = false, trashed = false, limit } = filters || {};
   let q = db().from('notes').select(NOTE_COLS);
   if (trashed) q = q.not('trashed_at', 'is', null);
   else {
@@ -75,7 +76,8 @@ export async function listNotes({ search, notebook, tag, kind, pinned, archived 
   q = trashed
     ? q.order('trashed_at', { ascending: false })
     : q.order('pinned', { ascending: false }).order('updated_at', { ascending: false });
-  return (await run(q.limit(n))) || [];
+  // Stable tiebreak + paging: PostgREST returns at most max_rows (1000) per request.
+  return fetchPaged(q.order('id', { ascending: true }), n);
 }
 
 /** The note, or null when it does not exist / is not visible. */
@@ -121,7 +123,8 @@ export async function emptyTrash() {
 
 /** Notebooks of live (not trashed, not archived) notes → [{name, count}] sorted by name. */
 export async function listNotebooks() {
-  const rows = await run(db().from('notes').select('notebook').is('trashed_at', null).eq('archived', false).not('notebook', 'is', null));
+  const rows = await fetchPaged(db().from('notes').select('id, notebook').is('trashed_at', null).eq('archived', false)
+    .not('notebook', 'is', null).order('id', { ascending: true }));
   const m = new Map();
   for (const r of rows || []) m.set(r.notebook, (m.get(r.notebook) || 0) + 1);
   return [...m].map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name, 'vi'));
@@ -129,7 +132,8 @@ export async function listNotebooks() {
 
 /** Tags of live notes → [{tag, count}] most used first. */
 export async function listNoteTags() {
-  const rows = await run(db().from('notes').select('tags').is('trashed_at', null).eq('archived', false));
+  const rows = await fetchPaged(db().from('notes').select('id, tags').is('trashed_at', null).eq('archived', false)
+    .order('id', { ascending: true }));
   const m = new Map();
   for (const r of rows || []) for (const t of r.tags || []) m.set(t, (m.get(t) || 0) + 1);
   return [...m].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, 'vi'));
@@ -141,7 +145,8 @@ export async function listNoteTags() {
  * (live = not trashed and not archived; notebooks/tags count live notes only).
  */
 export async function noteOverview() {
-  const rows = (await run(db().from('notes').select('notebook, tags, pinned, archived, kind, trashed_at').limit(10000))) || [];
+  // Every note, paged past max_rows (1000), so the counts are exact.
+  const rows = await fetchPaged(db().from('notes').select('id, notebook, tags, pinned, archived, kind, trashed_at').order('id', { ascending: true }));
   const counts = { all: 0, pinned: 0, note: 0, checklist: 0, journal: 0, meeting: 0, archived: 0, trash: 0 };
   const nb = new Map();
   const tg = new Map();

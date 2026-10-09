@@ -26,7 +26,7 @@ button.tk-ledger__item:hover { background: color-mix(in srgb, var(--surface-2) 7
 .tk-ledger__item:first-child::after { left: 0; }
 .tk-ledger__item.is-active::after { transform: scaleX(1); }
 .tk-ledger__n { font-family: var(--font-display); font-size: var(--fs-2xl); line-height: 1.05; letter-spacing: -0.02em; font-variant-numeric: lining-nums tabular-nums; }
-.tk-ledger__l { font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
+.tk-ledger__l { font-size: var(--fs-xs); color: var(--ink-3); }
 .tk-ledger__item.tone-danger .tk-ledger__n { color: var(--danger); }
 .tk-ledger__item.tone-accent .tk-ledger__n { color: var(--accent-ink); }
 .tk-ledger__item.tone-success .tk-ledger__n { color: var(--success); }
@@ -58,7 +58,7 @@ button.tk-ledger__item:hover { background: color-mix(in srgb, var(--surface-2) 7
   padding: 8px var(--s-4) 10px calc(var(--s-4) + 30px);
   border-top: 1px dashed var(--rule); min-height: 40px; font-size: var(--fs-xs); color: var(--ink-3);
 }
-.tk-qa__hint b { font-weight: 500; color: var(--ink-2); font-family: var(--font-mono); font-size: 11px; }
+.tk-qa__hint b { font-weight: 600; color: var(--ink-2); }
 .tk-qa__try { color: var(--accent-ink); font-weight: 500; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; margin-left: 4px; }
 .tk-qa__keys { margin-left: auto; white-space: nowrap; color: var(--ink-4); }
 .tk-pchip {
@@ -68,13 +68,12 @@ button.tk-ledger__item:hover { background: color-mix(in srgb, var(--surface-2) 7
   animation: tk-chip-in var(--t-med) var(--ease) both;
 }
 .tk-pchip svg { width: 12px; height: 12px; }
-.tk-pchip em { font-style: normal; font-family: var(--font-mono); font-size: 10px; color: var(--ink-4); margin-left: 2px; }
+.tk-pchip em { font-style: normal; font-size: 10.5px; color: var(--ink-4); margin-left: 2px; }
 .tk-pchip .prio, .tk-pchip .cat { font-size: var(--fs-xs); }
 .tk-pchip--title { background: transparent; border-style: dashed; color: var(--ink); font-weight: 500; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-.tk-pchip--due { background: var(--accent-soft); border-color: transparent; color: var(--accent-ink); font-family: var(--font-mono); }
+.tk-pchip--due { background: var(--accent-soft); border-color: transparent; color: var(--accent-ink); font-variant-numeric: tabular-nums; }
 .tk-pchip--due.is-bad { background: var(--danger-soft); color: var(--danger); }
-.tk-pchip--tag { font-family: var(--font-mono); }
-.tk-pchip--rec { background: var(--plum-soft); border-color: transparent; color: var(--plum); }
+.tk-pchip--rec { color: var(--ink-2); }
 @keyframes tk-chip-in { from { opacity: 0; transform: translateY(3px) scale(0.96); } }
 
 /* ---------- Toolbar ---------- */
@@ -84,7 +83,7 @@ button.tk-ledger__item:hover { background: color-mix(in srgb, var(--surface-2) 7
 .tk-search__kbd { position: absolute; right: 9px; pointer-events: none; transition: opacity var(--t-fast); }
 .tk-search:focus-within .tk-search__kbd { opacity: 0; }
 .tk-filter-toggle { display: none; }
-.tk-count:not(:empty) { margin-left: 2px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--accent); color: var(--accent-contrast); font-family: var(--font-mono); font-size: 10px; display: inline-grid; place-items: center; }
+.tk-count:not(:empty) { margin-left: 2px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--accent); color: var(--accent-contrast); font-size: 10.5px; font-weight: 600; display: inline-grid; place-items: center; font-variant-numeric: tabular-nums; }
 .tk-filters { display: flex; flex-wrap: wrap; gap: var(--s-2); flex: 1 1 auto; justify-content: flex-end; }
 .tk-filters .select { width: auto; min-width: 0; max-width: 190px; height: 34px; }
 .tk-filters .select:disabled { opacity: 0.5; }
@@ -95,7 +94,7 @@ button.tk-ledger__item:hover { background: color-mix(in srgb, var(--surface-2) 7
 .tk-subbar__right { display: flex; align-items: center; gap: var(--s-2); padding-bottom: 6px; flex-shrink: 0; }
 .tk-groupby { width: auto; height: 32px; }
 .tk-groupby[hidden] { display: none; }
-.tk-select-toggle[aria-pressed='true'] { background: var(--ink); color: var(--paper); }
+.tk-select-toggle[aria-pressed='true'] { background: var(--accent-soft); color: var(--accent-ink); }
 
 .tk-chipsbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: var(--s-4); }
 .tk-chipsbar:empty { display: none; }
@@ -125,9 +124,9 @@ button.tk-ledger__item:hover { background: color-mix(in srgb, var(--surface-2) 7
 .tk-group__title.tone-danger { color: var(--danger); }
 .tk-group__title.tone-accent { color: var(--accent-ink); }
 .tk-group__title.tone-success { color: var(--success); }
-.tk-group__sub { font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.06em; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.tk-group__count { margin-left: auto; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--ink-2); min-width: 22px; text-align: right; }
-.tk-group__est { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--ink-3); }
+.tk-group__sub { font-size: var(--fs-xs); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tk-group__count { margin-left: auto; font-variant-numeric: tabular-nums; font-size: var(--fs-xs); color: var(--ink-2); min-width: 22px; text-align: right; }
+.tk-group__est { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; font-size: var(--fs-xs); color: var(--ink-3); }
 .tk-group__est svg { width: 12px; height: 12px; }
 .tk-group .cat__dot { margin: 0 2px; }
 
@@ -181,11 +180,11 @@ button.tk-ledger__item:hover { background: color-mix(in srgb, var(--surface-2) 7
 .tk-row.is-done .tk-row__text, .tk-row.is-done .tk-row__desc { color: var(--ink-4); }
 .tk-row.is-cancelled .tk-row__main { opacity: 0.55; }
 
-.tk-rec { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; color: var(--plum); font-family: var(--font-mono); font-size: 10px; font-weight: 400; letter-spacing: 0.02em; }
+.tk-rec { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; color: var(--ink-3); font-size: var(--fs-xs); font-weight: 400; }
 .tk-rec svg { width: 12px; height: 12px; }
 .tk-state { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-xs); color: var(--info); font-weight: 600; }
-.tk-state::before { content: ''; width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid currentColor; border-right-color: transparent; }
-.tk-time-chip, .tk-ck { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--ink-3); white-space: nowrap; }
+.tk-state::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.tk-time-chip, .tk-ck { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; font-size: var(--fs-xs); color: var(--ink-3); white-space: nowrap; }
 .tk-time-chip svg, .tk-ck svg { width: 12px; height: 12px; }
 .tk-time-chip.is-over { color: var(--danger); }
 .tk-ck.is-full { color: var(--success); }
@@ -195,10 +194,10 @@ button.tk-ledger__item:hover { background: color-mix(in srgb, var(--surface-2) 7
 .tk-running i { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1.6s infinite; }
 
 /* completion choreography: tick pops + ring burst → strike draws → row folds away */
-.tk-row.is-completing .tick, .tk-card.is-completing .tick { background: var(--moss); border-color: var(--moss); color: var(--surface); }
+.tk-row.is-completing .tick, .tk-card.is-completing .tick { background: var(--success); border-color: var(--success); color: var(--surface); }
 .tk-row.is-completing .tick svg, .tk-card.is-completing .tick svg { animation: tick-pop var(--t-med) var(--ease); }
 .tk-row.is-completing .tick::after, .tk-card.is-completing .tick::after {
-  content: ''; position: absolute; inset: -2px; border-radius: 50%; border: 2px solid var(--moss);
+  content: ''; position: absolute; inset: -2px; border-radius: 50%; border: 2px solid var(--success);
   animation: tk-burst 520ms var(--ease) forwards;
 }
 .tk-row.is-completing .tk-row__text { background-size: 100% 1.5px; color: var(--ink-3); }
@@ -229,7 +228,6 @@ button.tk-ledger__item:hover { background: color-mix(in srgb, var(--surface-2) 7
 .tk-col.is-over { border-color: var(--col); box-shadow: 0 0 0 3px color-mix(in srgb, var(--col) 18%, transparent); background: color-mix(in srgb, var(--col) 6%, var(--paper-2)); }
 .tk-col__head { display: flex; align-items: center; gap: var(--s-2); padding: 2px 4px 6px; border-bottom: 1px solid var(--rule); }
 .tk-col__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--col, var(--ink-3)); }
-.tk-col--in_progress .tk-col__dot { background: transparent; border: 2px solid var(--col); border-right-color: transparent; }
 .tk-col__title { font-family: var(--font-display); font-size: var(--fs-md); font-weight: 500; }
 .tk-col__count { font-size: var(--fs-xs); color: var(--ink-3); }
 .tk-col__est { margin-left: auto; font-size: var(--fs-2xs); color: var(--ink-3); }
@@ -247,7 +245,6 @@ button.tk-ledger__item:hover { background: color-mix(in srgb, var(--surface-2) 7
   transition: box-shadow var(--t-fast), border-color var(--t-fast), transform var(--t-fast), opacity var(--t-fast);
 }
 .tk-card::before { content: ''; position: absolute; left: -1px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 2px 2px 0; background: var(--rule-strong); }
-.tk-card[data-p='medium']::before { background: var(--ochre); }
 .tk-card[data-p='high']::before { background: var(--accent); }
 .tk-card[data-p='urgent']::before { background: var(--danger); }
 .tk-card:hover { box-shadow: var(--shadow-2); border-color: var(--rule-strong); }
@@ -299,20 +296,20 @@ button.tk-ledger__item:hover { background: color-mix(in srgb, var(--surface-2) 7
 .tk-bulk__btn svg { width: 15px; height: 15px; }
 .tk-bulk__btn:hover { background: color-mix(in srgb, var(--paper) 12%, transparent); color: var(--paper); }
 .tk-bulk__btn:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
-.tk-bulk__btn--danger:hover { background: color-mix(in srgb, var(--clay) 40%, transparent); }
+.tk-bulk__btn--danger:hover { background: color-mix(in srgb, var(--danger) 40%, transparent); }
 .tk-bulk__all { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, var(--paper) 35%, transparent); }
 .tk-bulk__sep { width: 1px; align-self: stretch; margin: 6px 4px; background: color-mix(in srgb, var(--paper) 18%, transparent); }
 .tk-bulk__close { padding: 0; width: 36px; justify-content: center; margin-left: 2px; }
 
 /* ---------- Help dialog ---------- */
 .tk-help { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: var(--s-7); }
-.tk-help__h { display: flex; align-items: baseline; gap: var(--s-2); font-family: var(--font-display); font-size: var(--fs-lg); font-weight: 500; margin-bottom: var(--s-3); padding-bottom: var(--s-2); border-bottom: 1px solid var(--rule); }
-.tk-help__h .mono { font-size: var(--fs-2xs); color: var(--accent); letter-spacing: 0.08em; }
+.tk-help__h { display: flex; align-items: baseline; gap: var(--s-2); font-size: var(--fs-md); font-weight: 600; margin-bottom: var(--s-3); padding-bottom: var(--s-2); border-bottom: 1px solid var(--rule); }
 .tk-help__ex { font-size: var(--fs-xs); margin-bottom: var(--s-3); }
 .tk-help__ex .mono { color: var(--ink); background: var(--paper-2); padding: 2px 6px; border-radius: var(--radius-xs); line-height: 1.9; }
-.tk-help__dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px var(--s-4); margin: 0; font-size: var(--fs-sm); }
+.tk-help__dl { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 8px var(--s-4); margin: 0; font-size: var(--fs-sm); }
 .tk-help__dl dt { font-size: var(--fs-xs); color: var(--ink); }
 .tk-help__dl dd { margin: 0; color: var(--ink-3); font-size: var(--fs-xs); }
+.tk-help__dl--keys { grid-template-columns: auto minmax(0, 1fr); }
 .tk-help__dl--keys dt { white-space: nowrap; }
 @media (max-width: 720px) { .tk-help { grid-template-columns: minmax(0, 1fr); gap: var(--s-5); } }
 
@@ -320,7 +317,7 @@ button.tk-ledger__item:hover { background: color-mix(in srgb, var(--surface-2) 7
 .tk-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: calc(var(--s-2) * -1); }
 .tk-preset, .tk-chip {
   height: 28px; padding: 0 10px; border-radius: var(--radius-pill); border: 1px solid var(--rule-strong);
-  font-family: var(--font-mono); font-size: 11px; color: var(--ink-2); background: var(--surface);
+  font-size: var(--fs-xs); font-variant-numeric: tabular-nums; color: var(--ink-2); background: var(--surface);
   display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
   transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
 }
@@ -328,7 +325,7 @@ button.tk-ledger__item:hover { background: color-mix(in srgb, var(--surface-2) 7
 .tk-chip.is-on { background: var(--ink); border-color: var(--ink); color: var(--paper); }
 .tk-chip--ghost { border-style: dashed; color: var(--ink-3); }
 .tk-chip svg { width: 11px; height: 11px; }
-.tk-presets__actual { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); color: var(--ink-3); font-family: var(--font-mono); }
+.tk-presets__actual { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .tk-presets__actual svg { width: 12px; height: 12px; }
 
 /* =====================================================================
@@ -357,7 +354,7 @@ html.tk-drawer-lock { overflow: hidden; }
   background: var(--surface-2);
 }
 .tk-drawer__crumb { display: flex; align-items: center; gap: var(--s-3); min-width: 0; }
-.tk-drawer__saved { font-family: var(--font-mono); font-size: 10px; color: var(--ink-4); opacity: 0; transition: opacity var(--t-med); white-space: nowrap; }
+.tk-drawer__saved { font-size: var(--fs-xs); color: var(--ink-4); opacity: 0; transition: opacity var(--t-med); white-space: nowrap; }
 .tk-drawer__saved.is-visible { opacity: 1; }
 .tk-drawer__saved.is-error { color: var(--danger); }
 .tk-drawer__tools { display: flex; gap: 2px; }
@@ -373,7 +370,7 @@ html.tk-drawer-lock { overflow: hidden; }
   transition: border-color var(--t-fast), background var(--t-fast);
 }
 .tk-dtitle__input:hover { border-color: var(--rule); }
-.tk-dtitle__input:focus { border-color: var(--ink-3); background: var(--surface-2); box-shadow: none; }
+.tk-dtitle__input:focus { border-color: var(--accent); background: var(--surface-2); box-shadow: none; }
 .tk-dtitle.is-done .tk-dtitle__input { color: var(--ink-3); text-decoration: line-through; text-decoration-color: var(--ink-4); text-decoration-thickness: 1px; }
 
 .tk-props { margin: 0 0 var(--s-6); display: grid; border-top: 1px solid var(--rule); }
@@ -418,9 +415,8 @@ html.tk-drawer-lock { overflow: hidden; }
 .tk-prio-opt[data-prio='urgent'][aria-pressed='true'] { color: var(--danger); }
 
 .tk-dsec { margin-bottom: var(--s-6); }
-.tk-dsec__head { display: flex; align-items: center; gap: var(--s-3); margin-bottom: var(--s-3); padding-bottom: var(--s-2); border-bottom: 1px solid var(--ink); position: relative; }
-.tk-dsec__head::after { content: ''; position: absolute; left: 0; right: 0; bottom: -4px; height: 1px; background: var(--rule); }
-.tk-dsec__head h3 { display: flex; align-items: baseline; gap: var(--s-2); font-family: var(--font-display); font-size: var(--fs-lg); font-weight: 500; margin-right: auto; }
+.tk-dsec__head { display: flex; align-items: center; gap: var(--s-3); margin-bottom: var(--s-3); padding-bottom: var(--s-2); border-bottom: 1px solid var(--rule); }
+.tk-dsec__head h3 { display: flex; align-items: baseline; gap: var(--s-2); font-size: var(--fs-md); font-weight: 600; margin-right: auto; }
 .tk-check-sum { font-size: var(--fs-xs); color: var(--ink-3); }
 .tk-check-bar { height: 3px; background: var(--paper-2); border-radius: 2px; overflow: hidden; margin-bottom: var(--s-3); }
 .tk-check-bar span { display: block; height: 100%; background: var(--success); transition: width var(--t-slow) var(--ease); }
@@ -445,8 +441,8 @@ html.tk-drawer-lock { overflow: hidden; }
   transition: all var(--t-fast);
 }
 .md-box::before { content: ''; position: absolute; inset: -10px; }
-.md-box:hover { border-color: var(--moss); }
-.md-box[aria-checked='true'] { background: var(--moss); border-color: var(--moss); }
+.md-box:hover { border-color: var(--success); }
+.md-box[aria-checked='true'] { background: var(--success); border-color: var(--success); }
 .tk-desc-empty { width: 100%; text-align: left; padding: var(--s-4); border: 1px dashed var(--rule-strong); border-radius: var(--radius-sm); color: var(--ink-4); font-size: var(--fs-sm); }
 .tk-desc-empty:hover { color: var(--ink-2); border-color: var(--ink-3); }
 .tk-desc-input { min-height: 140px; font-size: var(--fs-sm); overflow: hidden; }
@@ -514,7 +510,7 @@ html.tk-drawer-lock { overflow: hidden; }
   .tk-ledger::-webkit-scrollbar { display: none; }
   .tk-ledger__item { padding: var(--s-2) var(--s-3) var(--s-3); min-height: 58px; }
   .tk-ledger__n { font-size: var(--fs-xl); }
-  .tk-ledger__l { font-size: 10px; letter-spacing: 0.08em; white-space: nowrap; }
+  .tk-ledger__l { font-size: 11px; }
 
   .tk-qa__row { padding-left: var(--s-3); }
   .tk-qa__kbd, .tk-qa__help { display: none; }
@@ -593,4 +589,24 @@ html.tk-drawer-lock { overflow: hidden; }
 @media (prefers-reduced-motion: reduce) {
   .tk-row, .tk-card, .tk-drawer__panel, .tk-drawer__scrim { transition: none; }
   .tk-row.is-completing, .tk-card.is-completing { animation: none; }
+}
+
+/* ---------- Pagination, linked notes, misc (QA pass) ---------- */
+.tk-more { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: var(--s-2) var(--s-3); padding: var(--s-4) var(--tk-gutter); border-top: 1px solid var(--rule); }
+.tk-more__left { font-size: var(--fs-xs); color: var(--ink-3); }
+.tk-foot { font-size: var(--fs-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.tk-sheet > .tk-group:first-child .tk-group__head { border-radius: var(--radius-md) var(--radius-md) 0 0; }
+.tk-notes { list-style: none; margin: 0 0 var(--s-3); padding: 0; display: grid; gap: 2px; }
+.tk-notes__item {
+  display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: var(--s-2); align-items: center;
+  padding: 8px var(--s-2); border-radius: var(--radius-sm); color: var(--ink); text-decoration: none; font-size: var(--fs-sm);
+  transition: background var(--t-fast);
+}
+.tk-notes__item:hover { background: var(--surface-2); color: var(--ink); }
+.tk-notes__item svg { width: 15px; height: 15px; color: var(--ink-3); }
+.tk-notes__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-notes__when { font-size: var(--fs-xs); color: var(--ink-4); white-space: nowrap; }
+@media (max-width: 640px) {
+  .tk-help-btn, .tk-qa__hint .tk-qa__try { display: none; }
+  .tk-qa__preview:has(.tk-qa__hint) { display: none; }
 }

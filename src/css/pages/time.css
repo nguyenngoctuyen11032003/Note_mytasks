@@ -1,5 +1,5 @@
 /* =====================================================================
-   § 04 Thời gian — focus timer, Pomodoro, focus mode, timeline, analytics
+   Thời gian — focus timer, Pomodoro, focus mode, timeline, analytics
    (owned by the Time/KPI agent; tm-* prefix)
    ===================================================================== */
 
@@ -10,15 +10,7 @@
   padding: var(--s-7) var(--s-8) var(--s-7) var(--s-7);
   margin-bottom: var(--s-5);
 }
-.tm-hero__dial {
-  position: relative; padding: var(--s-3);
-  background-image:
-    linear-gradient(var(--grid-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
-  background-size: 20px 20px;
-  -webkit-mask-image: radial-gradient(circle at center, var(--ink) 62%, transparent 74%);
-  mask-image: radial-gradient(circle at center, var(--ink) 62%, transparent 74%);
-}
+.tm-hero__dial { position: relative; padding: var(--s-3); }
 .tm-hero__panel { display: grid; gap: var(--s-4); min-width: 0; align-content: center; }
 .tm-hero__top { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; }
 .tm-hero__top .segmented button { height: 34px; }
@@ -47,7 +39,7 @@
 .tm-dial__cross { stroke: var(--ink-4); stroke-width: 1; }
 .tm-dial__ticks line { stroke: var(--ink-4); stroke-width: 1; }
 .tm-dial__ticks line.is-major { stroke: var(--ink-2); stroke-width: 1.4; }
-.tm-dial__nums text { font-family: var(--font-mono); font-size: 9px; fill: var(--ink-3); text-anchor: middle; dominant-baseline: central; letter-spacing: 0.04em; }
+.tm-dial__nums text { font-family: var(--font-sans); font-size: 9px; fill: var(--ink-3); text-anchor: middle; dominant-baseline: central; font-variant-numeric: tabular-nums; }
 .tm-dial__track { fill: none; stroke: var(--paper-2); stroke-width: 6; }
 .tm-dial__arc { fill: none; stroke: var(--arc); stroke-width: 6; stroke-linecap: round; transition: stroke-dasharray 1s linear, stroke var(--t-med); }
 .tm-dial__hand { stroke: var(--arc); stroke-width: 1.5; stroke-linecap: round; }
@@ -58,8 +50,8 @@
   text-align: center; gap: 6px; pointer-events: none;
 }
 .tm-dial__phase {
-  font-family: var(--font-mono); font-size: 11px; font-size: max(10px, 3.1cqi);
-  letter-spacing: 0.16em; text-transform: uppercase; color: var(--arc); font-weight: 500;
+  font-family: var(--font-sans); font-size: 12px; font-size: max(11px, 3.4cqi);
+  color: var(--arc); font-weight: 500;
 }
 .tm-dial[data-tone='watch'] .tm-dial__phase { color: var(--ink-3); }
 .tm-dial__digits {
@@ -80,13 +72,14 @@
 .tm-cycle__txt strong { color: var(--ink); font-weight: 600; }
 .tm-presets, .tm-durs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .tm-presets .eyebrow, .tm-durs .eyebrow { margin-right: var(--s-2); color: var(--ink-3); }
-.tm-durs .btn, .tm-presets .btn { min-height: 36px; font-family: var(--font-mono); }
-.tm-durline { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--ink-3); min-height: 1.2em; }
+.tm-durs .btn, .tm-presets .btn { min-height: 36px; font-variant-numeric: tabular-nums; }
+.tm-durline { font-variant-numeric: tabular-nums; font-size: var(--fs-xs); color: var(--ink-3); min-height: 1.2em; }
 
 /* ---------- Task picker (combobox) ---------- */
 .tm-pick { position: relative; }
 .tm-pick .input { padding-right: 42px; height: 42px; }
 .tm-pick__clear { position: absolute; right: 4px; width: 34px; height: 34px; display: grid; place-items: center; color: var(--ink-3); border-radius: var(--radius-sm); }
+.tm-pick__clear[hidden] { display: none; }
 .tm-pick__clear:hover { background: var(--surface-2); color: var(--ink); }
 .tm-pick__clear svg { width: 15px; height: 15px; }
 .tm-pick__list {
@@ -117,7 +110,6 @@
   margin: var(--s-9) 0 var(--s-5); padding-bottom: var(--s-3); border-bottom: 1px solid var(--rule);
 }
 .tm-period .tm-period__title { margin: 0; padding: 0; border: 0; }
-.tm-period .tm-period__title em { color: var(--accent); font-weight: 300; }
 .tm-period__ctrl { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; }
 .tm-period__ctrl .segmented button { height: 34px; padding: 0 var(--s-4); }
 .tm-period__nav { display: inline-flex; align-items: center; gap: 2px; }
@@ -133,7 +125,7 @@
 .tm-tl { padding: var(--s-3) var(--s-5) var(--s-5); }
 .tm-tl__axis, .tm-tl__row { display: grid; grid-template-columns: 124px minmax(0, 1fr); gap: var(--s-4); align-items: center; }
 .tm-tl__hours { position: relative; height: 20px; }
-.tm-tl__hours span { position: absolute; top: 2px; transform: translateX(-50%); font-family: var(--font-mono); font-size: 10px; color: var(--ink-4); }
+.tm-tl__hours span { position: absolute; top: 2px; transform: translateX(-50%); font-variant-numeric: tabular-nums; font-size: 10px; color: var(--ink-4); }
 .tm-tl__row { padding: 5px 0; border-top: 1px dashed var(--rule); }
 .tm-tl__row.is-future { opacity: 0.5; }
 .tm-tl__day { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 6px; align-items: baseline; }
@@ -165,7 +157,7 @@
 
 /* ---------- Charts ---------- */
 .tm-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s-3); margin: var(--s-4) 0 0; padding-top: var(--s-4); border-top: 1px solid var(--rule); }
-.tm-facts dt { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
+.tm-facts dt { font-size: var(--fs-xs); color: var(--ink-3); }
 .tm-facts dd { margin: 3px 0 0; font-size: var(--fs-sm); color: var(--ink); overflow-wrap: anywhere; }
 @media (max-width: 640px) { .tm-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .tm-donut { max-width: 220px; margin: 0 auto var(--s-4); }
@@ -183,12 +175,18 @@
 .tm-entry__time { font-size: var(--fs-xs); color: var(--ink-2); white-space: nowrap; }
 .tm-entry__main { display: grid; gap: 2px; min-width: 0; min-height: 44px; align-content: center; text-align: left; padding: 4px 0; border-radius: var(--radius-xs); }
 .tm-entry__main:disabled { cursor: default; }
-.tm-entry__main:not(:disabled):hover .tm-entry__title { color: var(--accent-ink); }
+@media (hover: hover) { .tm-entry__main:not(:disabled):hover .tm-entry__title { color: var(--accent-ink); } }
+.tm-entry__main:focus-visible .tm-entry__title { color: var(--accent-ink); }
+.tm-grid .sheet__head { flex-wrap: wrap; row-gap: var(--s-2); }
+.tm-grid .sheet__title h2 { white-space: nowrap; }
 .tm-entry__title { font-weight: 500; font-size: var(--fs-sm); }
 .tm-entry__meta { display: flex; align-items: center; gap: var(--s-2); font-size: var(--fs-xs); color: var(--ink-3); min-width: 0; overflow: hidden; }
 .tm-entry__meta:empty { display: none; }
 .tm-entry__dur { font-size: var(--fs-sm); font-weight: 500; white-space: nowrap; }
 .tm-entry.is-running { background: color-mix(in srgb, var(--accent-soft) 40%, transparent); }
+.tm-log__head { display: inline-flex; align-items: center; gap: var(--s-2); }
+.tm-log__head .icon-btn { width: 34px; height: 34px; }
+.tm-log__more { display: flex; justify-content: center; padding: var(--s-3) var(--s-4) var(--s-4); border-top: 1px solid var(--rule); }
 @media (max-width: 640px) {
   .tm-entry { grid-template-columns: minmax(0, 1fr) auto 40px; row-gap: 0; padding-left: var(--s-4); }
   .tm-entry__time { grid-column: 1 / -1; padding-top: 6px; }
@@ -206,7 +204,7 @@
 }
 .tm-focus__top { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-4) var(--s-5); }
 .tm-focus__top .eyebrow { color: var(--accent); }
-.tm-focus__hint { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--ink-4); }
+.tm-focus__hint { font-size: var(--fs-2xs); color: var(--ink-4); }
 .tm-focus__stage { flex: 1; display: grid; align-content: center; justify-items: center; gap: var(--s-5); padding: var(--s-2) var(--s-5) var(--s-8); text-align: center; }
 .tm-focus .tm-dial { width: min(82vw, 58vh, 520px); }
 .tm-focus__task { display: grid; gap: 4px; max-width: 42ch; min-height: 3em; }
@@ -228,6 +226,8 @@
   .tm-btn-xl { flex: 1 1 100%; padding: 0 var(--s-4); }
   .tm-focus__stage { gap: var(--s-4); padding-bottom: var(--s-6); }
   .tm-focus .tm-dial { width: min(86vw, 50vh); }
+  .tm-focus__hint { display: none; }
+  .tm-focus__top .eyebrow { white-space: nowrap; }
 }
 
 @media (prefers-reduced-motion: reduce) {

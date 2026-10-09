@@ -1,4 +1,4 @@
-// § 02 Ghi chú — three-pane notes workspace (library · list · editor).
+// Ghi chú — three-pane notes workspace (library · list · editor).
 // Desktop: 3 panes. ≤ 1100px: library becomes a drawer. ≤ 720px: one pane at a
 // time (list ↔ editor) with a back button and a thumb-reachable format bar.
 import { html, mount, on, raw, fragment } from '../utils/dom.js';
@@ -72,9 +72,7 @@ export default async function notesPage(root, { query }) {
   mount(root, html`
     <div class="nb-page">
       ${pageHead({
-        num: '02',
-        kicker: 'Ghi chú',
-        title: 'Sổ tay <em>ghi chép</em>',
+        title: 'Ghi chú',
         actions: html`
           <button class="btn btn--ghost" data-act="new-blank" title="Mở ngay một trang trắng">${icon('edit')} Viết nhanh</button>
           <button class="btn btn--primary" data-act="templates" title="Chọn mẫu cho ghi chú mới (N)">${icon('plus')} Ghi chú mới <kbd class="nb-kbd">N</kbd></button>`,
