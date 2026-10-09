@@ -6,7 +6,7 @@ export const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim() 
 
 export const isConfigured = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 
-export const APP_NAME = 'Note_mytasks';
+export const APP_NAME = 'Stratos';
 
 /**
  * Base URL of the deployed app, keeping a GitHub Pages sub-path (/<repo>/).

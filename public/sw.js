@@ -1,4 +1,4 @@
-/* Note_mytasks service worker.
+/* Stratos service worker.
  *
  * Served from the app root (./sw.js) so its scope is the GitHub Pages
  * sub-path (/<repo>/). The build (vite.config.js → nmServiceWorker) stamps a
@@ -24,7 +24,7 @@ const KEEP = new Set([SHELL, FONTS]);
 const scopeUrl = new URL(self.registration.scope);
 const INDEX = new URL('./index.html', scopeUrl).href;
 const ROOT = scopeUrl.href;
-const CORE = [ROOT, INDEX, new URL('./manifest.webmanifest', scopeUrl).href, new URL('./favicon.svg', scopeUrl).href];
+const CORE = [ROOT, INDEX, new URL('./manifest.webmanifest', scopeUrl).href, new URL('./favicon.ico', scopeUrl).href];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

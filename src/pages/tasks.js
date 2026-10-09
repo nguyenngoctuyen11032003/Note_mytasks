@@ -11,7 +11,7 @@ import { toast } from '../components/toast.js';
 import * as timer from '../components/timer.js';
 import * as store from '../core/store.js';
 import { setQuery } from '../core/router.js';
-import { onDataChanged } from '../core/events.js';
+import { onDataChanged, disposeOnAbort } from '../core/events.js';
 import { debounce } from '../utils/debounce.js';
 import {
   listTasks, getTask, createTask, updateTask, setTaskStatus, deleteTask,
@@ -103,7 +103,7 @@ function readPrefs(query) {
 
 /* ------------------------------------------------------------------ */
 
-export default async function tasksPage(root, { query }) {
+export default async function tasksPage(root, { query, signal }) {
   const f = readPrefs(query);
   let tasks = [];
   let loaded = false;
@@ -117,6 +117,7 @@ export default async function tasksPage(root, { query }) {
   const selected = new Set();
   const collapsed = new Set(readLS(LS_COLLAPSED, []));
   const disposers = [];
+  disposeOnAbort(signal, disposers); // released on navigation even if this page never returns
   let destroyed = false;
 
   mount(root, html`
@@ -390,7 +391,9 @@ export default async function tasksPage(root, { query }) {
     renderChips();
     renderBulk();
     root.querySelector('.tk-page').classList.toggle('is-selecting', selecting || selected.size > 0);
-    root.querySelector('.tk-page').dataset.view = f.view;
+    // Not data-view: that attribute marks the view-switch buttons, and on the page
+    // root it made the delegated [data-view] click handler fire on every click.
+    root.querySelector('.tk-page').dataset.tkView = f.view;
     if (loadError) { mount($('[data-body]'), errorState(loadError)); return; }
     if (!loaded) { renderSkeleton(); return; }
 

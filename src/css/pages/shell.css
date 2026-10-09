@@ -47,8 +47,8 @@ button.usercard {
 @media (min-width: 961px) {
   :root[data-sidebar='rail'] .shell { grid-template-columns: var(--shell-rail) minmax(0, 1fr); }
   :root[data-sidebar='rail'] .sidebar { padding-inline: 10px; align-items: stretch; }
-  :root[data-sidebar='rail'] .brand { justify-content: center; padding-inline: 0; }
-  :root[data-sidebar='rail'] .brand__text,
+  :root[data-sidebar='rail'] .sidebar .brand { justify-content: center; padding-inline: 0; }
+  :root[data-sidebar='rail'] .sidebar .brand__text,
   :root[data-sidebar='rail'] .nav__num,
   :root[data-sidebar='rail'] .nav__label,
   :root[data-sidebar='rail'] .nav__group span,

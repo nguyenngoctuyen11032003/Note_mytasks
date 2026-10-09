@@ -48,6 +48,10 @@ const RECOVERY = '/reset-password';
 
 let content = null;
 let cleanup = null;
+// Aborted on every navigation: pages tie their listeners to this signal
+// (core/events.js disposeOnAbort), so a page interrupted mid-load or one that
+// threw still releases them — not only pages that returned a cleanup.
+let pageAbort = null;
 let renderToken = 0;
 let recoveryMode = false;
 let firstPrivateRender = true;
@@ -140,7 +144,8 @@ async function render(opts) {
   try {
     const mod = await PRIVATE[path]();
     if (token !== renderToken) return;
-    const dispose = (await mod.default(content, { query, path })) || null;
+    pageAbort = new AbortController();
+    const dispose = (await mod.default(content, { query, path, signal: pageAbort.signal })) || null;
     // A newer navigation started while this page was loading: tear this page
     // down now, otherwise its listeners outlive it and the newer page's
     // disposer could be overwritten.
@@ -177,11 +182,15 @@ async function renderAuthPage(kind, query, token) {
   firstPrivateRender = true;
   const mod = await import('./pages/auth.js');
   if (token !== renderToken) return;
-  document.title = 'Note_mytasks';
+  document.title = 'Stratos';
   cleanup = mod.default(app, { kind, query }) || null;
 }
 
 function runCleanup() {
+  // Abort first: it empties the page's disposers, so the explicit cleanup
+  // below can't run them a second time.
+  pageAbort?.abort();
+  pageAbort = null;
   if (typeof cleanup === 'function') {
     try { cleanup(); } catch (e) { console.error(e); }
   }

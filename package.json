@@ -1,5 +1,5 @@
 {
-  "name": "note-mytasks",
+  "name": "stratos",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "icons": "node scripts/gen-icons.mjs",
+    "icons": "node scripts/make-icons.mjs",
     "db:check": "node scripts/db/check.mjs",
     "db:test": "node scripts/db/test.mjs",
     "db:seed": "node scripts/db/seed.mjs",

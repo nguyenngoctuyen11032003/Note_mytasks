@@ -239,7 +239,7 @@ export function openPalette(initial = '') {
         <span><kbd>↑</kbd><kbd>↓</kbd> chọn</span>
         <span><kbd>↵</kbd> mở</span>
         <span><kbd>Esc</kbd> đóng</span>
-        <span class="cmdk__brand">Note_mytasks</span>
+        <span class="cmdk__brand">Stratos</span>
       </footer>
       <div class="sr-only" role="status" aria-live="polite" data-count></div>
     </dialog>`);

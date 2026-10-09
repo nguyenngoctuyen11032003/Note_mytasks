@@ -8,7 +8,7 @@ import { emptyState, errorState, loadingBlock } from '../components/states.js';
 import { openTaskForm } from '../components/taskForm.js';
 import { toast } from '../components/toast.js';
 import { setQuery } from '../core/router.js';
-import { onDataChanged, notifyDataChanged } from '../core/events.js';
+import { onDataChanged, notifyDataChanged, disposeOnAbort } from '../core/events.js';
 import { listTasks, getTask, setTaskStatus, updateTask } from '../services/tasks.js';
 import { listEntries, entrySeconds } from '../services/timeEntries.js';
 import { listExpenses } from '../services/expenses.js';
@@ -59,7 +59,7 @@ function localMinutes(instant) {
   return h * 60 + m;
 }
 
-export default async function calendarPage(root, { query }) {
+export default async function calendarPage(root, { query, signal }) {
   const t0 = today();
   let view = VIEWS[query.view] ? query.view : 'month';
   let date = isDay(query.date) ? query.date : isDay(query.d) ? query.d : /^\d{4}-\d{2}$/.test(query.m || '') ? query.m + '-01' : t0;
@@ -71,6 +71,7 @@ export default async function calendarPage(root, { query }) {
   let dragId = null;
   const taskNames = new Map(); // task_id → title, for entries whose task is due outside the range
   const disposers = [];
+  disposeOnAbort(signal, disposers); // released on navigation even if this page never returns
 
   mount(root, html`
     ${pageHead({

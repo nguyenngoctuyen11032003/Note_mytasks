@@ -7,7 +7,7 @@ import { errorState, loadingBlock, statTileSkeleton, emptyState } from '../compo
 import { makeChart, palette, series } from '../components/chart.js';
 import { toast } from '../components/toast.js';
 import { setQuery } from '../core/router.js';
-import { onDataChanged } from '../core/events.js';
+import { onDataChanged, disposeOnAbort } from '../core/events.js';
 import { onThemeChange } from '../components/theme.js';
 import { productivityReport, financeReport, kpiReport, notesReport } from '../services/reports.js';
 import { PAYMENT_METHODS } from '../services/expenses.js';
@@ -146,7 +146,7 @@ function cycleText(h) {
 
 /* ------------------------------------------------------------------ */
 
-export default async function reportsPage(root, { query }) {
+export default async function reportsPage(root, { query, signal }) {
   const t0 = today();
   let kind = KINDS.some((k) => k.id === query.p) ? query.p : 'month';
   let anchor = isDay(query.d) && query.d <= t0 ? query.d : t0;
@@ -160,6 +160,7 @@ export default async function reportsPage(root, { query }) {
   const S = { prod: undefined, fin: undefined, kpi: undefined, notes: undefined };
   const charts = { prod: [], time: [], fin: [], notes: [] };
   const disposers = [];
+  disposeOnAbort(signal, disposers); // released on navigation even if this page never returns
 
   mount(root, html`
     ${pageHead({
@@ -192,7 +193,7 @@ export default async function reportsPage(root, { query }) {
 
     <article class="report" data-report>
       <header class="rp-print-head" aria-hidden="true">
-        <span class="rp-print-brand">Note_mytasks · Báo cáo</span>
+        <span class="rp-print-brand">Stratos · Báo cáo</span>
         <h1 data-print-title></h1>
         <p data-print-meta></p>
       </header>

@@ -10,7 +10,7 @@ import { skinPickerField, bindSkinPicker } from '../components/skinPicker.js';
 import { GO_KEYS, MOD } from '../components/commandPalette.js';
 import { reloadCategories } from '../components/context.js';
 import * as store from '../core/store.js';
-import { notifyDataChanged } from '../core/events.js';
+import { notifyDataChanged, disposeOnAbort } from '../core/events.js';
 import {
   updateProfile, getAvatarColor, setAvatarColor, getHomePage, setHomePage, HOME_PAGES, isValidTimezone,
   uploadAvatar, removeAvatar,
@@ -67,7 +67,9 @@ const keysRow = (sc) => html`<div class="st-keys__row"><dt>${sc.keys.map((combo,
 function timezoneList(current) {
   let all = [];
   try { all = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : []; } catch { all = []; }
-  const common = COMMON_TZ.filter((z) => z === 'UTC' || !all.length || all.includes(z));
+  // Not filtered by supportedValuesOf: Chromium lists the alias Asia/Saigon and
+  // omits Asia/Ho_Chi_Minh, which both Intl and Postgres accept.
+  const common = [...COMMON_TZ];
   if (current && !common.includes(current)) common.unshift(current);
   return { common, rest: all.filter((z) => !common.includes(z)) };
 }
@@ -82,8 +84,9 @@ const tzLabel = (z) => {
   }
 };
 
-export default async function settingsPage(root) {
+export default async function settingsPage(root, { signal } = {}) {
   const disposers = [];
+  disposeOnAbort(signal, disposers); // released on navigation even if this page never returns
   let catKind = 'task';
   let observer = null;
 
@@ -243,9 +246,9 @@ export default async function settingsPage(root) {
           </section>
 
           <section class="st-sect" id="s-install" aria-labelledby="h-install">
-            ${head('h-install', 'Cài đặt ứng dụng', 'Note_mytasks là ứng dụng web cài được (PWA): mở nhanh từ màn hình chính, toàn màn hình, không cần cửa hàng ứng dụng.')}
+            ${head('h-install', 'Cài đặt ứng dụng', 'Stratos là ứng dụng web cài được (PWA): mở nhanh từ màn hình chính, toàn màn hình, không cần cửa hàng ứng dụng.')}
             <div class="st-form">
-              ${standalone ? html`<p class="notice notice--success">${icon('checkCircle')}<span>Bạn đang dùng Note_mytasks như một ứng dụng đã cài đặt.</span></p>` : ''}
+              ${standalone ? html`<p class="notice notice--success">${icon('checkCircle')}<span>Bạn đang dùng Stratos như một ứng dụng đã cài đặt.</span></p>` : ''}
               <div class="st-install">
                 <article>
                   <h3>${icon('phone')} iPhone / iPad</h3>

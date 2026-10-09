@@ -12,7 +12,7 @@ import { makeChart, palette, series } from '../components/chart.js';
 import { toast } from '../components/toast.js';
 import * as store from '../core/store.js';
 import { setQuery } from '../core/router.js';
-import { onDataChanged } from '../core/events.js';
+import { onDataChanged, disposeOnAbort } from '../core/events.js';
 import { onThemeChange } from '../components/theme.js';
 import { debounce } from '../utils/debounce.js';
 import { toCSV, downloadText } from '../utils/csv.js';
@@ -50,7 +50,7 @@ const daysIn = (d) => Number(endOfMonth(d).slice(8));
 function readPm() { try { return localStorage.getItem(PM_KEY) || null; } catch { return null; } }
 function writePm(v) { try { localStorage.setItem(PM_KEY, v); } catch { /* private mode */ } }
 
-export default async function expensesPage(root, { query }) {
+export default async function expensesPage(root, { query, signal }) {
   const t0 = today();
   let period = PERIODS[query.period] ? query.period : 'month';
   let date = isDay(query.date) ? query.date : t0;
@@ -74,6 +74,7 @@ export default async function expensesPage(root, { query }) {
   const pendingDel = new Map(); // id → { x, timer }
   const f = { q: query.q || '', cat: query.cat || '', pm: query.pm || '' };
   const disposers = [];
+  disposeOnAbort(signal, disposers); // released on navigation even if this page never returns
   const charts = new Map();
 
   mount(root, html`

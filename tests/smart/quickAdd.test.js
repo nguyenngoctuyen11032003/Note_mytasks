@@ -279,9 +279,11 @@ describe('parseTaskInput — combined & edge cases', () => {
     expect(r.title).toBe('Nộp bài');
   });
 
-  it('title never empty: falls back to the original text', () => {
-    expect(parse('ngày mai')).toMatchObject({ title: 'ngày mai', due_date: '2026-10-10' });
-    expect(parse('  #a   !!  ')).toMatchObject({ title: '#a !!', tags: ['a'], priority: 'high' });
+  it('only metadata → empty title (the UI then asks for a title); metadata is still parsed', () => {
+    expect(parse('ngày mai')).toMatchObject({ title: '', due_date: '2026-10-10' });
+    expect(parse('  #a   !!  ')).toMatchObject({ title: '', tags: ['a'], priority: 'high' });
+    expect(parse('#chỉ-thẻ !cao')).toMatchObject({ title: '', tags: ['chỉ-thẻ'], priority: 'high' });
+    expect(parse('Gọi khách #sales')).toMatchObject({ title: 'Gọi khách', tags: ['sales'] });
   });
 
   it('tidies whitespace and stray separators', () => {

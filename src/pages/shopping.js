@@ -10,7 +10,7 @@ import { openModal, field, input, select, textarea, confirmDialog } from '../com
 import { toast } from '../components/toast.js';
 import * as store from '../core/store.js';
 import { setQuery } from '../core/router.js';
-import { onDataChanged } from '../core/events.js';
+import { onDataChanged, disposeOnAbort } from '../core/events.js';
 import { debounce } from '../utils/debounce.js';
 import {
   listShopping, createItem, updateItem, deleteItem, purchaseWithPrice, revertPurchase, SHOP_STATUS, SHOP_PRIORITY,
@@ -29,7 +29,7 @@ const PM_KEY = 'nm:xp:pm';
 function readPm() { try { return localStorage.getItem(PM_KEY) || 'cash'; } catch { return 'cash'; } }
 function writePm(v) { try { localStorage.setItem(PM_KEY, v); } catch { /* private mode */ } }
 
-export default async function shoppingPage(root, { query }) {
+export default async function shoppingPage(root, { query, signal }) {
   let tab = TABS.includes(query.tab) ? query.tab : 'planned';
   let items = [];
   let expMap = new Map();
@@ -39,6 +39,7 @@ export default async function shoppingPage(root, { query }) {
   const f = { q: '', cat: '', sort: 'priority', group: 'priority' };
   const qa = { status: 'planned', catId: null, manual: false };
   const disposers = [];
+  disposeOnAbort(signal, disposers); // released on navigation even if this page never returns
   const t0 = today();
 
   mount(root, html`

@@ -57,9 +57,9 @@ export function mountShell(app, { onSignOut, onQuickAdd, onSearch }) {
       <a class="skip-link" href="#content" data-act="skip">Bỏ qua, tới nội dung chính</a>
       <aside class="sidebar" id="sidebar" aria-label="Điều hướng chính">
         <div class="sidebar__top">
-          <a class="brand" href="#/dashboard" aria-label="Note_mytasks — Tổng quan">
-            <span class="brand__mark" aria-hidden="true">N</span>
-            <span class="brand__text"><span class="brand__name">Note_mytasks</span><span class="brand__sub">Sổ tay cá nhân</span></span>
+          <a class="brand" href="#/dashboard" aria-label="Stratos — Tổng quan">
+            <span class="brand__mark brand__mark--logo" aria-hidden="true"><img src="./icons/logo-mark.png" alt="" width="228" height="256" decoding="async" /></span>
+            <span class="brand__text"><span class="brand__name">Stratos</span><span class="brand__sub">Hệ sinh thái cá nhân</span></span>
           </a>
           <button class="icon-btn sidebar__close" type="button" data-act="close-nav" aria-label="Đóng menu">${icon('x')}</button>
         </div>
@@ -210,7 +210,7 @@ export function setActive(path) {
   const title = item?.label || 'Không tìm thấy trang';
   root.querySelector('[data-title]').textContent = title;
   root.classList.remove('tabbar-hidden');
-  document.title = `${title} · Note_mytasks`;
+  document.title = `${title} · Stratos`;
 }
 
 export function setBadge(path, value) {

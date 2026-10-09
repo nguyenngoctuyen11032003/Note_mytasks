@@ -1,6 +1,6 @@
-# Note_mytasks
+# Stratos
 
-Sổ tay cá nhân: công việc, lịch, bấm giờ, KPI, chi tiêu – ngân sách, mua sắm và báo cáo. Web tĩnh (Vite, JavaScript thuần) + Supabase (Auth, PostgreSQL, RLS).
+Hệ sinh thái cá nhân (trước đây là Note_mytasks): ghi chú, công việc, lịch, bấm giờ, KPI, chi tiêu – ngân sách, mua sắm và báo cáo. Web tĩnh (Vite, JavaScript thuần) + Supabase (Auth, PostgreSQL, RLS).
 
 ## Chạy trên máy
 
@@ -29,7 +29,7 @@ Chỉ hai biến `VITE_*` được đưa vào trình duyệt. Thiếu một tron
 | Báo cáo `#/reports` | Tuần / tháng / quý / năm / tùy chọn, so với kỳ trước; CSV; in / PDF (luôn in bằng bảng màu sáng) |
 | Cài đặt `#/settings` | Hồ sơ, tiền tệ, múi giờ, giao diện sáng/tối, danh mục, mật khẩu, sao lưu / khôi phục JSON |
 
-Toàn cục: bảng lệnh `Ctrl/⌘+K`, `G` + phím để chuyển trang, `N` tạo mới, `?` bảng phím tắt; PWA cài được; giao diện “Coffee Glass” cho điện thoại và laptop (thanh tab dưới trên điện thoại). Icon PWA: `npm run icons` (`scripts/gen-icons.mjs`).
+Toàn cục: bảng lệnh `Ctrl/⌘+K`, `G` + phím để chuyển trang, `N` tạo mới, `?` bảng phím tắt; PWA cài được; giao diện “Coffee Glass” cho điện thoại và laptop (thanh tab dưới trên điện thoại). Icon web/PWA/iOS sinh từ logo gốc `design/brand/logo-source.png`: `npm i --no-save sharp && npm run icons` (`scripts/make-icons.mjs`).
 
 ## Cấu trúc `src/`
 

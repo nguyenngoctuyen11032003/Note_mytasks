@@ -90,7 +90,7 @@ Tuần bắt đầu theo `profiles.week_starts_on`. `running` = `timer_current()
 
 | Module | Export |
 |---|---|
-| `quickAdd.js` | `parseTaskInput(text, {today, categories})` → `{title, due_date, priority, tags, estimated_minutes, category_id, recurrence}` — hiểu tiếng Việt: "mai", "hôm nay", "ngày kia", "thứ 2..CN", "cn", "tuần sau", "dd/mm", "dd/mm/yyyy", "!gấp/!cao/!thấp", "!!!", "#tag", "30p/1h/1g30/1.5h", "@category", "mỗi ngày/hằng ngày/hàng tuần/mỗi tháng/ngày thường". |
+| `quickAdd.js` | `parseTaskInput(text, {today, categories})` → `{title, due_date, priority, tags, estimated_minutes, category_id, recurrence}` — hiểu tiếng Việt: "mai", "hôm nay", "ngày kia", "thứ 2..CN", "cn", "tuần sau", "dd/mm", "dd/mm/yyyy", "!gấp/!cao/!thấp", "!!!", "#tag", "30p/1h/1g30/1.5h", "@category", "mỗi ngày/hằng ngày/hàng tuần/mỗi tháng/ngày thường". Chỉ có metadata (thẻ/ngày/ưu tiên), không có chữ → `title = ""` để UI yêu cầu nhập tiêu đề. |
 | `expenseParser.js` | `parseExpenseInput(text, {today})` → `{amount, description, spent_on, payment_method}` — "cà phê 35k", "ăn trưa 1tr2", "grab 120.000 hôm qua momo", "điện 1,5tr ck". |
 | `categorizer.js` | `suggestCategory(description, {history, categories})` → `[{category_id, confidence, source}]` — kết hợp lịch sử (token vote) + từ điển từ khóa tiếng Việt mặc định cho 9 category chi tiêu. `normalizeVi(text)` bỏ dấu. |
 | `insights.js` | `buildInsights({summary, budgets, kpis, anomalies, productivity})` → `[{id, severity:'info'|'warning'|'critical'|'success', title, detail, action?}]` tiếng Việt, sắp xếp theo severity, tối đa 6. |

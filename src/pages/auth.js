@@ -37,16 +37,16 @@ const FEATURES = [
 ];
 
 const brand = (cls = '') => html`
-  <a class="brand ${cls}" href="#/login" aria-label="Note_mytasks">
-    <span class="brand__mark" aria-hidden="true">N</span>
-    <span class="brand__text"><span class="brand__name">Note_mytasks</span><span class="brand__sub">Sổ tay cá nhân</span></span>
+  <a class="brand ${cls}" href="#/login" aria-label="Stratos">
+    <span class="brand__mark brand__mark--logo" aria-hidden="true"><img src="./icons/logo-mark.png" alt="" width="228" height="256" decoding="async" /></span>
+    <span class="brand__text"><span class="brand__name">Stratos</span><span class="brand__sub">Hệ sinh thái cá nhân</span></span>
   </a>`;
 
 export default function renderAuth(app, { kind, query }) {
   const c = COPY[kind] || COPY.login;
   mount(app, html`
     <div class="auth">
-      <section class="auth__plate auth-panel" aria-label="Giới thiệu Note_mytasks">
+      <section class="auth__plate auth-panel" aria-label="Giới thiệu Stratos">
         ${brand()}
         <div class="auth-panel__body">
           <h2 class="auth-panel__title">Mọi việc của một ngày, gọn trong một chỗ.</h2>
@@ -68,7 +68,7 @@ export default function renderAuth(app, { kind, query }) {
         </div>
       </main>
     </div>`);
-  document.title = `${c.title} · Note_mytasks`;
+  document.title = `${c.title} · Stratos`;
 
   const form = app.querySelector('form');
   const btn = form.querySelector('[type=submit]');
@@ -252,7 +252,7 @@ function showNotice(el, type, msg) {
  * @param {{ path?: string, home?: string }} [o]
  */
 export function renderNotFound(el, { path = '', home = '/dashboard' } = {}) {
-  document.title = 'Không tìm thấy trang · Note_mytasks';
+  document.title = 'Không tìm thấy trang · Stratos';
   mount(el, html`
     <section class="notfound" aria-labelledby="nf-title">
       <span class="notfound__code" aria-hidden="true">404</span>

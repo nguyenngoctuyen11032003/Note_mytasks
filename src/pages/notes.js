@@ -9,7 +9,7 @@ import { openModal, confirmDialog, field, input } from '../components/modal.js';
 import { openTaskForm } from '../components/taskForm.js';
 import { toast } from '../components/toast.js';
 import { setQuery, navigate } from '../core/router.js';
-import { onDataChanged, notifyDataChanged } from '../core/events.js';
+import { onDataChanged, notifyDataChanged, disposeOnAbort } from '../core/events.js';
 import { debounce } from '../utils/debounce.js';
 import { today, dayOf, diffDays } from '../utils/date.js';
 import { time as fmtTime, relDay, dateTime, num, monthLabel, ago } from '../utils/format.js';
@@ -42,7 +42,7 @@ const store = {
 };
 const mqPhone = window.matchMedia('(max-width: 720px)');
 
-export default async function notesPage(root, { query }) {
+export default async function notesPage(root, { query, signal }) {
   const f = {
     view: VIEWS.some((v) => v.id === query.view) ? query.view : 'all',
     nb: query.nb || '',
@@ -68,6 +68,7 @@ export default async function notesPage(root, { query }) {
   let listToken = 0;
   const taskCache = new Map();
   const disposers = [];
+  disposeOnAbort(signal, disposers); // released on navigation even if this page never returns
 
   mount(root, html`
     <div class="nb-page">
@@ -104,8 +105,11 @@ export default async function notesPage(root, { query }) {
     const bar = document.querySelector('.topbar');
     if (bar) root.style.setProperty('--nb-top', Math.round(bar.getBoundingClientRect().height) + 'px');
     if (isPhone()) { ws.style.removeProperty('--nb-h'); return; }
-    const top = ws.getBoundingClientRect().top + window.scrollY;
-    ws.style.setProperty('--nb-h', Math.max(520, Math.floor(window.innerHeight - top - 20)) + 'px');
+    // offsetTop ignores transforms, so the entrance slide-in (which shifts the
+    // workspace down while it plays) can't shorten the measured height.
+    let top = 0;
+    for (let el = ws; el; el = el.offsetParent) top += el.offsetTop;
+    ws.style.setProperty('--nb-h', Math.max(520, Math.floor(window.innerHeight - top - 16)) + 'px');
   }
   // Phones: opening the editor pushes a same-URL history entry so the browser
   // Back button returns to the list instead of leaving the page. pushState with

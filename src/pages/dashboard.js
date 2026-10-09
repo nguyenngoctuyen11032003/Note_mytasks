@@ -13,7 +13,7 @@ import { toast } from '../components/toast.js';
 import * as timer from '../components/timer.js';
 import * as store from '../core/store.js';
 import { navigate } from '../core/router.js';
-import { onDataChanged, notifyDataChanged } from '../core/events.js';
+import { onDataChanged, notifyDataChanged, disposeOnAbort } from '../core/events.js';
 import { listTasks, setTaskStatus, focusTasks, listCompletedBetween } from '../services/tasks.js';
 import { listEntries, entrySeconds } from '../services/timeEntries.js';
 import { listExpenses, listRecent, anomalies as expenseAnomalies } from '../services/expenses.js';
@@ -130,8 +130,9 @@ const deltaChip = (d, fmt = (x) => num(x)) =>
 
 /* ================================================================== */
 
-export default async function dashboard(root) {
+export default async function dashboard(root, { signal } = {}) {
   const disposers = [];
+  disposeOnAbort(signal, disposers); // released on navigation even if this page never returns
   const charts = new Map();
   let token = 0;
   let S = null; // derived state of the last successful load

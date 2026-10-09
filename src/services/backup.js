@@ -145,9 +145,9 @@ export async function parseBackup(file) {
     throw invalid('file', 'Tệp không phải JSON hợp lệ.');
   }
   if (!data || typeof data !== 'object' || !data.tables || typeof data.tables !== 'object') {
-    throw invalid('file', 'Tệp không đúng định dạng sao lưu của Note_mytasks.');
+    throw invalid('file', 'Tệp không đúng định dạng sao lưu của Stratos (Note_mytasks).');
   }
-  if (data.app && data.app !== BACKUP_APP) throw invalid('file', 'Tệp sao lưu không phải của Note_mytasks.');
+  if (data.app && data.app !== BACKUP_APP) throw invalid('file', 'Tệp này không phải bản sao lưu của Stratos (Note_mytasks).');
   if (Number(data.version) > BACKUP_VERSION) throw invalid('file', 'Tệp được tạo bởi phiên bản mới hơn — hãy cập nhật ứng dụng.');
   const tables = {};
   const unknown = [];

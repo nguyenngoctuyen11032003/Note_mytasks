@@ -8,7 +8,7 @@ import { openModal, field, input, textarea, select, confirmDialog } from '../com
 import { makeChart, palette } from '../components/chart.js';
 import { toast } from '../components/toast.js';
 import { setQuery } from '../core/router.js';
-import { onDataChanged } from '../core/events.js';
+import { onDataChanged, disposeOnAbort } from '../core/events.js';
 import {
   listKpis, createKpi, updateKpi, deleteKpi, listAllRecords, addRecord, updateRecord, deleteRecord, forecastAll,
 } from '../services/kpis.js';
@@ -78,7 +78,7 @@ const rate = (perDay, u) => {
   return `${w > 0 ? '+' : ''}${dec(Math.round(w * 100) / 100)}${unitTxt(u)}/tuần`;
 };
 
-export default async function kpiPage(root, { query }) {
+export default async function kpiPage(root, { query, signal }) {
   let tab = STATUS[query.tab] ? query.tab : 'active';
   let fsFilter = FC[query.fs] ? query.fs : '';
   let kpis = [];
@@ -86,6 +86,7 @@ export default async function kpiPage(root, { query }) {
   let fc = new Map();
   let detail = null; // { id, render, close }
   const disposers = [];
+  disposeOnAbort(signal, disposers); // released on navigation even if this page never returns
 
   mount(root, html`
     ${pageHead({

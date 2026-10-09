@@ -241,3 +241,21 @@
   :root .nav__group { padding-top: 10px; padding-bottom: 4px; }
   :root .nav__item { padding-block: 6px; min-height: 34px; }
 }
+
+/* Brand logo: the bare transparent mark (no tile), sized by its height.
+   :root and the double class beat theme.css and the glass skins' rules. */
+:root .brand__mark.brand__mark--logo {
+  --logo-h: 40px;
+  width: auto; height: var(--logo-h); padding: 0; border: 0; border-radius: 0;
+  background: none; box-shadow: none; overflow: visible;
+}
+:root .brand__mark.brand__mark--logo::after { display: none; }
+.brand__mark--logo img {
+  height: var(--logo-h); width: auto; max-width: none; display: block;
+  filter: drop-shadow(0 4px 10px rgba(60, 90, 255, 0.28));
+}
+:root .auth__plate .brand__mark--logo { --logo-h: 56px; }
+:root .auth__mbrand .brand__mark--logo { --logo-h: 44px; }
+@media (min-width: 961px) {
+  :root[data-sidebar='rail'] .sidebar .brand__mark--logo { --logo-h: 32px; }
+}

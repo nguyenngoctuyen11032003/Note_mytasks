@@ -515,8 +515,9 @@ export function parseTaskInput(text, { today, categories } = {}) {
   const due_date = recurDue ?? parseDate(sc, t);
   const due_time = parseTimeOfDay(sc);
 
-  let title = sc.remainder();
-  if (!title) title = sc.src.replace(/\s+/g, ' ').trim();
+  // Only metadata (tags / date / priority …) and no words left → empty title, so the
+  // caller can ask for a title instead of creating a task named "#tag !cao".
+  const title = sc.remainder();
   const out = { title, due_date, priority, tags, estimated_minutes, category_id, recurrence };
   if (due_time) out.due_time = due_time;
   return out;

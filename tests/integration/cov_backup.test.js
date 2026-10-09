@@ -136,7 +136,7 @@ describe('backup.js — parseBackup validation', () => {
     await bad('[]', /không đúng định dạng/);
     await bad(JSON.stringify({ app: 'note-mytasks', version: 1 }), /không đúng định dạng/);
     await bad(JSON.stringify({ ...ok, tables: 'x' }), /không đúng định dạng/);
-    await bad(JSON.stringify({ ...ok, app: 'other-app' }), /không phải của Note_mytasks/);
+    await bad(JSON.stringify({ ...ok, app: 'other-app' }), /không phải bản sao lưu của Stratos \(Note_mytasks\)/);
     await bad(JSON.stringify({ ...ok, version: 2 }), /phiên bản mới hơn/);
     await bad(JSON.stringify({ ...ok, version: '99' }), /phiên bản mới hơn/);
     await bad(JSON.stringify({ ...ok, tables: { tasks: { id: 'x' } } }), /Bảng "tasks" trong tệp bị hỏng/);

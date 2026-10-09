@@ -12,7 +12,7 @@ import * as timer from '../components/timer.js';
 import * as store from '../core/store.js';
 import { categoryById } from '../core/store.js';
 import { setQuery } from '../core/router.js';
-import { onDataChanged } from '../core/events.js';
+import { onDataChanged, disposeOnAbort } from '../core/events.js';
 import { onThemeChange } from '../components/theme.js';
 import { listTasks } from '../services/tasks.js';
 import { listEntries, entrySeconds, logTime, updateEntry, deleteEntry } from '../services/timer.js';
@@ -31,7 +31,7 @@ const fc = timer.formatCountdown;
 const secsOf = (e) => entrySeconds(e, timer.serverNow());
 const durLabel = (secs) => (secs > 0 && secs < 60 ? '< 1p' : minutes(secs / 60));
 
-export default async function timePage(root, { query }) {
+export default async function timePage(root, { query, signal }) {
   let period = query.period === 'month' ? 'month' : 'week';
   let offset = Math.min(0, Math.trunc(Number(query.offset) || 0));
   let tasks = [];
@@ -49,6 +49,7 @@ export default async function timePage(root, { query }) {
   let wakeLock = null;
   let reloadTimer = null;
   const disposers = [];
+  disposeOnAbort(signal, disposers); // released on navigation even if this page never returns
 
   mount(root, html`
     ${pageHead({
