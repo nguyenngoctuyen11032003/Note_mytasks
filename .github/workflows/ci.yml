@@ -43,7 +43,7 @@ jobs:
   database:
     name: Database migrations (local)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
 
@@ -58,6 +58,20 @@ jobs:
 
       - name: Lint database schema
         run: supabase db lint --fail-on error
+
+      # Service layer chạy thật qua supabase-js → Auth (GoTrue) + PostgREST + Postgres local.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Start Auth + REST on top of the local database
+        run: supabase start -x studio,imgproxy,vector,logflare,edge-runtime,realtime,storage-api,mailpit,postgres-meta,supavisor
+
+      - name: Integration tests (real Supabase stack)
+        run: npm run test:integration
 
       - name: Stop local database
         if: always()

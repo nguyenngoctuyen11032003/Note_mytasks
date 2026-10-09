@@ -11,7 +11,9 @@
     "test:watch": "vitest",
     "db:check": "node scripts/db/check.mjs",
     "db:test": "node scripts/db/test.mjs",
-    "db:seed": "node scripts/db/seed.mjs"
+    "db:seed": "node scripts/db/seed.mjs",
+    "db:push": "node scripts/db/push.mjs",
+    "test:integration": "vitest run --config vitest.integration.config.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.3",
