@@ -16,6 +16,9 @@ function localStatus() {
   }
   const s = JSON.parse(out.slice(out.indexOf('{')));
   const st = { url: s.API_URL, anon: s.ANON_KEY, service: s.SERVICE_ROLE_KEY };
+  if (!st.url || !st.anon || !st.service) {
+    throw new Error(`Unexpected \`supabase status\` output (keys: ${Object.keys(s).join(', ')}). Set IT_SUPABASE_URL, IT_ANON_KEY, IT_SERVICE_KEY.`);
+  }
   Object.assign(process.env, { IT_SUPABASE_URL: st.url, IT_ANON_KEY: st.anon, IT_SERVICE_KEY: st.service });
   return st;
 }

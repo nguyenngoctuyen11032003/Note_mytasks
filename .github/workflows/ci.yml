@@ -70,6 +70,19 @@ jobs:
       - name: Start Auth + REST on top of the local database
         run: supabase start -x studio,imgproxy,vector,logflare,edge-runtime,realtime,storage-api,mailpit,postgres-meta,supavisor
 
+      # Lấy URL/key từ chính CLI đã cài ở trên (npx supabase sẽ tải bản khác, định dạng status khác).
+      - name: Export local Supabase credentials
+        run: |
+          supabase status -o json > "$RUNNER_TEMP/sb-status.json"
+          node -e '
+            const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+            const url = s.API_URL, anon = s.ANON_KEY, service = s.SERVICE_ROLE_KEY;
+            if (!url || !anon || !service) { console.error("supabase status thiếu khoá:", Object.keys(s)); process.exit(1); }
+            for (const k of [anon, service]) console.log(`::add-mask::${k}`);
+            require("fs").appendFileSync(process.env.GITHUB_ENV,
+              `IT_SUPABASE_URL=${url}\nIT_ANON_KEY=${anon}\nIT_SERVICE_KEY=${service}\n`);
+          ' "$RUNNER_TEMP/sb-status.json"
+
       - name: Integration tests (real Supabase stack)
         run: npm run test:integration
 
