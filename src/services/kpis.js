@@ -125,3 +125,88 @@ export function kpiProgress(k) {
 }
 
 export { listKpis as list, createKpi as create, updateKpi as update, deleteKpi as remove, deleteKpi as delete, progress as forecast, progress as kpiForecast };
+
+/* ------------------------------------------------------------------ */
+/* Client-side forecast — mirrors SQL kpi_forecast() (migration 000600) */
+/* so non-active KPIs (and databases without the RPC) get the same     */
+/* numbers. Pure: no network.                                          */
+/* ------------------------------------------------------------------ */
+
+const DAY_MS = 86400000;
+const dayNum = (d) => Math.round(Date.parse(`${d}T00:00:00Z`) / DAY_MS);
+const numToDay = (n) => new Date(n * DAY_MS).toISOString().slice(0, 10);
+const round = (v, d) => Math.round(v * 10 ** d) / 10 ** d;
+
+/**
+ * forecastLocal(kpi, records, today) → same shape as a kpi_forecast() row.
+ * `records` = this KPI's kpi_records rows (any order).
+ */
+export function forecastLocal(kpi, records = [], todayDay) {
+  const target = Number(kpi.target_value) || 0;
+  // Latest record per calendar day.
+  const byDay = new Map();
+  [...records]
+    .sort((a, b) => (a.recorded_on === b.recorded_on ? String(a.created_at).localeCompare(String(b.created_at)) : a.recorded_on < b.recorded_on ? -1 : 1))
+    .forEach((r) => byDay.set(r.recorded_on, Number(r.value)));
+  const pts = [...byDay.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  const n = pts.length;
+  const s0 = dayNum(kpi.start_date);
+  const t = dayNum(todayDay);
+  const end = kpi.end_date ? dayNum(kpi.end_date) : null;
+
+  let slope = null;
+  if (n >= 2) {
+    const xs = pts.map(([d]) => dayNum(d) - s0), ys = pts.map(([, v]) => v);
+    const mx = xs.reduce((a, b) => a + b, 0) / n, my = ys.reduce((a, b) => a + b, 0) / n;
+    let sxy = 0, sxx = 0;
+    xs.forEach((x, i) => { sxy += (x - mx) * (ys[i] - my); sxx += (x - mx) ** 2; });
+    slope = sxx > 0 ? round(sxy / sxx, 6) : null;
+  }
+  const cur = n ? pts[n - 1][1] : Number(kpi.current_value) || 0;
+  const lastDay = n ? dayNum(pts[n - 1][0]) : null;
+  const progress = target > 0 ? round((cur / target) * 100, 1) : 0;
+
+  let expected = null;
+  if (end != null) {
+    if (end === s0) expected = t >= end ? 100 : 0;
+    else expected = round(Math.min(Math.max(((t - s0) / (end - s0)) * 100, 0), 100), 1);
+  }
+  let projected = null;
+  if (end != null && slope != null) projected = t > end ? cur : round(cur + slope * Math.max(end - lastDay, 0), 2);
+  let completion = null;
+  if (slope > 0 && cur < target) {
+    const need = Math.ceil((target - cur) / slope);
+    if (need <= 36500) completion = numToDay(lastDay + need);
+  }
+  let status;
+  if (cur >= target) status = 'achieved';
+  else if (n < 2) status = 'no_data';
+  else if (end == null) status = slope > 0 ? 'on_track' : slope === 0 ? 'at_risk' : 'off_track';
+  else if (projected >= target || progress >= expected) status = 'on_track';
+  else if (projected >= 0.8 * target) status = 'at_risk';
+  else status = 'off_track';
+
+  return {
+    kpi_id: kpi.id, name: kpi.name, unit: kpi.unit, target_value: target, current_value: cur, progress_pct: progress,
+    start_date: kpi.start_date, end_date: kpi.end_date, records: n, slope_per_day: slope, projected_value: projected,
+    projected_completion: completion, expected_pct: expected, status,
+  };
+}
+
+/**
+ * Forecast for every KPI: server RPC for active ones (source of truth),
+ * local computation for the rest or when the RPC is unavailable.
+ * Returns Map(kpi_id → forecast row).
+ */
+export async function forecastAll(kpis, records, todayDay) {
+  const out = new Map();
+  let server = [];
+  if (kpis.some((k) => k.status === 'active')) {
+    try { server = await progress(null); } catch { server = []; }
+  }
+  server.forEach((f) => out.set(f.kpi_id, f));
+  for (const k of kpis) {
+    if (!out.has(k.id)) out.set(k.id, forecastLocal(k, records.filter((r) => r.kpi_id === k.id), todayDay));
+  }
+  return out;
+}

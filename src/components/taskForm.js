@@ -7,6 +7,32 @@ import { toast } from './toast.js';
 import { minutes as fmtMinutes } from '../utils/format.js';
 import { icon } from './icons.js';
 
+export const RECURRENCE_LABELS = {
+  daily: 'Hằng ngày',
+  weekdays: 'Ngày làm việc (T2–T6)',
+  weekly: 'Hằng tuần',
+  monthly: 'Hằng tháng',
+};
+export const RECURRENCE_SHORT = { daily: 'Hằng ngày', weekdays: 'T2–T6', weekly: 'Hằng tuần', monthly: 'Hằng tháng' };
+export const ESTIMATE_PRESETS = [15, 30, 60, 90, 120, 240];
+
+/** Fields of the form → write payload (recurrence only sent when it means something). */
+function toPayload(v, task) {
+  const p = {
+    title: v.title,
+    description: v.description || null,
+    status: v.status,
+    priority: v.priority,
+    category_id: v.category_id || null,
+    due_date: v.due_date || null,
+    estimated_minutes: v.estimated_minutes === '' ? null : Number(v.estimated_minutes),
+    tags: JSON.parse(v.tags || '[]'),
+  };
+  // Older databases (before migration 000300) have no recurrence column: never send a no-op null.
+  if (v.recurrence || task?.recurrence) p.recurrence = v.recurrence || null;
+  return p;
+}
+
 /**
  * openTaskForm({ task?, defaults?, onSaved(task), onDeleted(id) })
  */
@@ -18,7 +44,7 @@ export function openTaskForm({ task = null, defaults = {}, onSaved, onDeleted } 
   const body = html`
     <div class="form">
       ${field({ label: 'Tiêu đề', name: 'title', control: input('title', t.title, 'maxlength="200" required autofocus placeholder="Ví dụ: Hoàn thiện báo cáo quý"') })}
-      ${field({ label: 'Mô tả', name: 'description', optional: true, control: textarea('description', t.description, 'maxlength="5000" rows="3" placeholder="Ghi chú, liên kết, các bước…"') })}
+      ${field({ label: 'Mô tả', name: 'description', optional: true, hint: 'Hỗ trợ Markdown đơn giản: **đậm**, *nghiêng*, - danh sách, - [ ] việc con, [liên kết](https://…)', control: textarea('description', t.description, 'maxlength="5000" rows="3" placeholder="Ghi chú, liên kết, các bước…"') })}
       <div class="form-row">
         ${field({ label: 'Trạng thái', name: 'status', control: select('status', Object.entries(TASK_STATUS).map(([v, s]) => ({ value: v, label: s.label })), t.status) })}
         ${field({ label: 'Độ ưu tiên', name: 'priority', control: select('priority', Object.entries(TASK_PRIORITY).map(([v, l]) => ({ value: v, label: l })), t.priority) })}
@@ -28,8 +54,12 @@ export function openTaskForm({ task = null, defaults = {}, onSaved, onDeleted } 
         ${field({ label: 'Hạn chót', name: 'due_date', optional: true, control: input('due_date', t.due_date, 'type="date"') })}
       </div>
       <div class="form-row">
-        ${field({ label: 'Ước tính (phút)', name: 'estimated_minutes', optional: true, hint: 'Ví dụ 90 = 1g 30p', control: input('estimated_minutes', est, 'type="number" min="0" step="5" inputmode="numeric"') })}
-        ${field({ label: 'Thời gian thực tế', name: '_actual', hint: 'Tự cộng từ các phiên tính giờ', control: input('_actual', fmtMinutes(t.actual_minutes || 0), 'disabled') })}
+        ${field({ label: 'Ước tính (phút)', name: 'estimated_minutes', optional: true, control: input('estimated_minutes', est, 'type="number" min="0" step="5" inputmode="numeric"') })}
+        ${field({ label: 'Lặp lại', name: 'recurrence', optional: true, control: select('recurrence', [{ value: '', label: 'Không lặp' }, ...Object.entries(RECURRENCE_LABELS).map(([v, l]) => ({ value: v, label: l }))], t.recurrence || '') })}
+      </div>
+      <div class="tk-presets" role="group" aria-label="Ước tính nhanh">
+        ${ESTIMATE_PRESETS.map((m) => html`<button type="button" class="tk-preset" data-est="${m}">${fmtMinutes(m)}</button>`)}
+        ${isEdit ? html`<span class="tk-presets__actual">${icon('clock')} Thực tế: ${fmtMinutes(t.actual_minutes || 0)}</span>` : ''}
       </div>
       ${field({ label: 'Thẻ', name: 'tags', optional: true, control: tagInput('tags', t.tags || []) })}
     </div>`;
@@ -50,22 +80,19 @@ export function openTaskForm({ task = null, defaults = {}, onSaved, onDeleted } 
       return e;
     },
     async onSubmit(v) {
-      const payload = {
-        title: v.title,
-        description: v.description || null,
-        status: v.status,
-        priority: v.priority,
-        category_id: v.category_id || null,
-        due_date: v.due_date || null,
-        estimated_minutes: v.estimated_minutes === '' ? null : Number(v.estimated_minutes),
-        tags: JSON.parse(v.tags || '[]'),
-      };
+      const payload = toPayload(v, task);
       const saved = isEdit ? await updateTask(task.id, payload) : await createTask(payload);
       toast(isEdit ? 'Đã lưu công việc.' : 'Đã tạo công việc.');
       onSaved?.(saved);
     },
   });
   bindTagInput(m.body);
+
+  m.body.querySelectorAll('[data-est]').forEach((b) => b.addEventListener('click', () => {
+    const inp = m.body.querySelector('[name="estimated_minutes"]');
+    inp.value = b.dataset.est;
+    inp.dispatchEvent(new Event('input', { bubbles: true }));
+  }));
 
   m.el.querySelector('[data-del]')?.addEventListener('click', async () => {
     const ok = await confirmDialog({

@@ -1,3 +1,14 @@
+@import './pages/notes.css';
+@import './pages/tasks.css';
+@import './pages/dashboard.css';
+@import './pages/calendar.css';
+@import './pages/expenses.css';
+@import './pages/shopping.css';
+@import './pages/time.css';
+@import './pages/kpi.css';
+@import './pages/reports.css';
+@import './pages/settings.css';
+@import './pages/shell.css';
 /* =====================================================================
    Page-specific layouts
    ===================================================================== */
@@ -233,3 +244,5 @@ button.tag:hover { border-color: var(--ink-3); }
   .settings__nav a { white-space: nowrap; }
   .settings__head, .settings__form { padding-left: var(--s-5); padding-right: var(--s-5); }
 }
+
+/* Per-page style sheets (one owner each) */

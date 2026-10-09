@@ -3,9 +3,12 @@
    ===================================================================== */
 
 .shell {
+  --shell-rail: 76px;
+  --tabbar-h: 64px;
   display: grid;
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
   min-height: 100dvh;
+  transition: grid-template-columns var(--t-med) var(--ease);
 }
 
 /* ---------- Sidebar ---------- */
@@ -14,7 +17,7 @@
   display: flex; flex-direction: column;
   background: var(--paper-2);
   border-right: 1px solid var(--rule);
-  padding: var(--s-5) var(--s-4) var(--s-4);
+  padding: max(var(--s-5), env(safe-area-inset-top)) var(--s-4) max(var(--s-4), env(safe-area-inset-bottom)) max(var(--s-4), env(safe-area-inset-left));
   z-index: 30;
 }
 
@@ -94,7 +97,7 @@
   position: sticky; top: 0; z-index: 20;
   height: var(--topbar-h);
   display: flex; align-items: center; gap: var(--s-4);
-  padding: 0 var(--s-7);
+  padding: 0 max(var(--s-7), env(safe-area-inset-right)) 0 var(--s-7);
   background: color-mix(in srgb, var(--paper) 86%, transparent);
   backdrop-filter: blur(10px) saturate(1.1);
   -webkit-backdrop-filter: blur(10px) saturate(1.1);
@@ -115,6 +118,7 @@
   flex: 1;
 }
 .content.is-entering { animation: page-in var(--t-slow) var(--ease) both; }
+.content:focus, .content h1:focus { box-shadow: none; }
 @keyframes page-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
 /* ---------- Page header (drafting-sheet title block) ---------- */
@@ -170,10 +174,10 @@
     opacity: 0; pointer-events: none; transition: opacity var(--t-med);
   }
   .shell.nav-open .scrim { opacity: 1; pointer-events: auto; }
-  .topbar { padding: 0 var(--s-4); }
+  .topbar { padding: 0 max(var(--s-4), env(safe-area-inset-right)) 0 max(var(--s-4), env(safe-area-inset-left)); }
   .topbar__menu { display: inline-grid; }
   .topbar__date { display: none; }
-  .content { padding: var(--s-5) var(--s-4) var(--s-9); }
+  .content { padding: var(--s-5) max(var(--s-4), env(safe-area-inset-right)) var(--s-9) max(var(--s-4), env(safe-area-inset-left)); }
   .grid-3 { grid-template-columns: minmax(0, 1fr); }
   .grid-2 { grid-template-columns: minmax(0, 1fr); }
 }

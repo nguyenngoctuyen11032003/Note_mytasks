@@ -76,3 +76,64 @@ export async function streaks() {
   const d = (await rpc('streaks')) || {};
   return { current: n(d.current), longest: n(d.longest), last_active_day: d.last_active_day ?? null };
 }
+
+/* ------------------------------------------------------------------ */
+/* Pure helpers (no network) — used by the Dashboard page.             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Today's spending allowance: what is left of the month budget (excluding
+ * today's own spending) spread evenly over the remaining days incl. today.
+ * Returns null when there is no budget.
+ */
+export function dailyAllowance({ budget, monthSpent = 0, todaySpent = 0, today: t, monthEnd }) {
+  if (budget == null || !(budget > 0) || !t || !monthEnd) return null;
+  const daysLeft = Math.max(1, diffDays(monthEnd, t) + 1);
+  return Math.max(0, (budget - (monthSpent - todaySpent)) / daysLeft);
+}
+
+/**
+ * Burn-down series for a month. `byDay` = { 'YYYY-MM-DD': amount }.
+ * → { days, actual (null after today), ideal (null without budget), projected (null before today), projectedTotal }
+ */
+export function burnDown({ byDay = {}, month, budget = null, today: t }) {
+  const start = startOfMonth(month);
+  const end = endOfMonth(start);
+  const days = [];
+  for (let d = start, i = 0; d <= end && i < 32; i++) {
+    days.push(d);
+    const [y, m, dd] = d.split('-').map(Number);
+    const nx = new Date(Date.UTC(y, m - 1, dd + 1, 12));
+    d = nx.toISOString().slice(0, 10);
+  }
+  const total = days.length;
+  let acc = 0;
+  const actual = days.map((d) => (t && d > t ? null : (acc += Number(byDay[d]) || 0)));
+  const elapsed = t ? Math.min(total, Math.max(0, diffDays(t, start) + 1)) : total;
+  const rate = elapsed > 0 ? acc / elapsed : 0;
+  const projected = days.map((d, i) => (i + 1 < elapsed ? null : Math.round(rate * (i + 1))));
+  const ideal = budget > 0 ? days.map((_, i) => Math.round((budget * (i + 1)) / total)) : null;
+  return { days, actual, ideal, projected, spent: acc, projectedTotal: Math.round(rate * total), elapsed, total };
+}
+
+/**
+ * Activity streak from a set of active days (≥ 1 task completed or ≥ 15 min tracked).
+ * Counts back from today (or yesterday when today is not active yet), never
+ * past `windowStart`. `capped` = the streak reaches the window start.
+ */
+export function streakFrom(activeDays, t, windowStart) {
+  const has = (d) => activeDays.has(d);
+  const back = (d) => {
+    const [y, m, dd] = d.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, dd - 1, 12)).toISOString().slice(0, 10);
+  };
+  let d = has(t) ? t : back(t);
+  let current = 0;
+  while (d >= windowStart && has(d)) { current++; d = back(d); }
+  let longest = 0, run = 0;
+  for (let x = t; x >= windowStart; x = back(x)) {
+    run = has(x) ? run + 1 : 0;
+    longest = Math.max(longest, run);
+  }
+  return { current, longest: Math.max(longest, current), capped: d < windowStart };
+}

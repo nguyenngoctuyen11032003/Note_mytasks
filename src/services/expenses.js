@@ -29,6 +29,7 @@ export function validateExpense(input, { partial = false } = {}) {
 }
 
 const normalize = (rows) => numify(rows, ['amount']);
+const LIST_PAGE = 1000; // PostgREST max_rows
 
 export async function listExpenses({ from, to, categoryId, paymentMethod, search, minAmount, maxAmount, limit = 2000 } = {}) {
   let q = db().from('expenses').select(SELECT);
@@ -45,9 +46,18 @@ export async function listExpenses({ from, to, categoryId, paymentMethod, search
   if (max != null) q = q.lte('amount', max);
   const s = typeof search === 'string' ? search.trim() : '';
   if (s) q = q.or(searchOr(s, ['description', 'note']));
-  q = q.order('spent_on', { ascending: false }).order('created_at', { ascending: false })
-    .limit(Math.min(Math.max(Number(limit) || 2000, 1), 5000));
-  return normalize(await run(q));
+  q = q.order('spent_on', { ascending: false }).order('created_at', { ascending: false }).order('id', { ascending: true });
+  // PostgREST caps every response at max_rows (1000): page with range() so a
+  // limit above that is honoured instead of silently truncated.
+  const cap = Math.min(Math.max(Number(limit) || 2000, 1), 5000);
+  const out = [];
+  while (out.length < cap) {
+    const want = Math.min(LIST_PAGE, cap - out.length);
+    const rows = (await run(q.range(out.length, out.length + want - 1))) || [];
+    out.push(...rows);
+    if (rows.length < want) break;
+  }
+  return normalize(out);
 }
 
 export async function createExpense(input) {
@@ -95,6 +105,27 @@ export async function suggestCategory(description) {
   const s = typeof description === 'string' ? description.trim() : '';
   if (s.length < 2) return [];
   return numify((await rpc('suggest_expense_category', { p_description: s })) || [], ['confidence']);
+}
+
+/**
+ * Lightweight recent history used on the client to learn categories and to
+ * order "recent" chips (description, category, payment method). Newest first.
+ */
+export async function listRecent({ days = 180, limit = 600 } = {}) {
+  const d = vNumber(days, 'days', { min: 1, max: 3660, integer: true, label: 'Số ngày' }) ?? 180;
+  const from = new Date(Date.now() - d * 86400000).toISOString().slice(0, 10);
+  const q = db().from('expenses').select('id, amount, category_id, description, payment_method, spent_on, created_at')
+    .gte('spent_on', from)
+    .order('created_at', { ascending: false })
+    .limit(Math.min(Math.max(Number(limit) || 600, 1), 2000));
+  return normalize(await run(q));
+}
+
+/** Fetch specific expenses (e.g. the ones linked from shopping items). */
+export async function getExpensesByIds(ids) {
+  const list = [...new Set((ids || []).filter((x) => typeof x === 'string' && x))].slice(0, 500);
+  if (!list.length) return [];
+  return normalize(await run(db().from('expenses').select(EXPENSE_COLS).in('id', list)));
 }
 
 // Short aliases (expenses.list / expenses.create …)

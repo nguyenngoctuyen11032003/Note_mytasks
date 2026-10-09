@@ -1,0 +1,222 @@
+/* reports — page-specific styles (owned by the Reports/Settings agent)
+   Editorial layout: § numbered sections separated by hairlines, figures on
+   paper "plates", and a dedicated A4 print layout at the bottom. */
+
+/* ---------- Period bar ---------- */
+.rp-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-3) var(--s-4);
+  margin-bottom: var(--s-3);
+}
+.rp-bar .segmented button { min-height: 32px; }
+.rp-nav { display: flex; align-items: center; gap: var(--s-1); min-width: 0; }
+.rp-nav .icon-btn { width: 40px; height: 40px; }
+.rp-nav .icon-btn:disabled { opacity: 0.35; pointer-events: none; }
+.rp-nav__title {
+  font-family: var(--font-display); font-weight: 400; font-size: var(--fs-lg);
+  letter-spacing: -0.01em; min-width: 10ch; text-align: center; padding: 0 var(--s-2);
+}
+.rp-custom { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+.rp-custom[hidden] { display: none; }
+.rp-custom .input { width: auto; min-width: 140px; }
+.rp-cmp { margin-left: auto; min-height: 40px; }
+
+.rp-range {
+  display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-4);
+  font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.03em; color: var(--ink-3);
+  padding-bottom: var(--s-4); margin-bottom: var(--s-2); border-bottom: 1px solid var(--rule);
+}
+.rp-range span + span::before { content: '·'; margin-right: var(--s-4); color: var(--ink-4); }
+
+/* ---------- Sections ---------- */
+.report { display: grid; gap: 0; }
+.rp-print-head { display: none; }
+
+.rp-sec { padding: var(--s-8) 0 var(--s-7); border-bottom: 1px solid var(--rule); min-width: 0; }
+.rp-sec:last-child { border-bottom: 0; }
+.rp-sec__head {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--s-2) var(--s-5);
+  align-items: baseline; margin-bottom: var(--s-5);
+}
+.rp-sec__num {
+  font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--accent);
+  letter-spacing: 0.1em; padding-top: 6px; white-space: nowrap;
+}
+.rp-sec__titles h2 {
+  font-family: var(--font-display); font-weight: 400; font-size: var(--fs-2xl);
+  line-height: 1.1; letter-spacing: -0.02em;
+}
+.rp-sec__titles p { color: var(--ink-3); font-size: var(--fs-sm); margin-top: 4px; max-width: 70ch; }
+.rp-sec__head .btn { align-self: center; min-height: 40px; }
+
+/* ---------- Summary ---------- */
+.rp-sec--summary { padding-top: var(--s-6); }
+.rp-summary { max-width: 78ch; }
+.rp-lede {
+  font-family: var(--font-display); font-weight: 300; font-size: clamp(1.125rem, 0.95rem + 0.6vw, 1.375rem);
+  line-height: 1.6; color: var(--ink); text-wrap: pretty;
+}
+.rp-lede strong { font-weight: 500; color: var(--accent-ink); }
+.rp-tip {
+  display: flex; gap: var(--s-3); align-items: flex-start; margin-top: var(--s-4);
+  padding: var(--s-3) var(--s-4); border-left: 2px solid var(--accent); background: var(--accent-soft);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: var(--fs-sm); color: var(--ink-2);
+}
+.rp-tip svg { width: 16px; height: 16px; flex-shrink: 0; color: var(--accent); margin-top: 2px; }
+.rp-summary__actions { margin-top: var(--s-4); }
+.rp-summary__actions .btn { min-height: 40px; }
+
+/* ---------- Tiles ---------- */
+.rp-tiles {
+  display: grid; gap: var(--s-4); margin-bottom: var(--s-5);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 168px), 1fr));
+}
+.rp-tiles .stat { min-width: 0; }
+.rp-tiles .stat__value { overflow-wrap: anywhere; }
+.rp-tiles--stack { grid-template-columns: minmax(0, 1fr); margin-bottom: 0; align-content: start; }
+.rp-val--sm { font-size: var(--fs-xl) !important; line-height: 1.2 !important; letter-spacing: -0.01em !important; }
+
+/* ---------- Figures ---------- */
+.rp-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--s-5); }
+.rp-fig {
+  margin: 0; min-width: 0; padding: var(--s-4) var(--s-5) var(--s-5);
+  background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius-md);
+}
+.rp-fig--full { grid-column: 1 / -1; }
+.rp-fig figcaption {
+  display: flex; justify-content: space-between; align-items: baseline; gap: var(--s-3); flex-wrap: wrap;
+  font-size: var(--fs-xs); font-weight: 600; color: var(--ink-2); margin-bottom: var(--s-3);
+  padding-bottom: var(--s-2); border-bottom: 1px dashed var(--rule);
+}
+.rp-legend { margin-top: var(--s-4); }
+.rp-key-dash { display: inline-block; width: 14px !important; height: 0 !important; border-top: 2px dashed var(--ink-3); border-radius: 0 !important; background: none !important; }
+
+.rp-sub {
+  font-family: var(--font-display); font-weight: 400; font-size: var(--fs-lg);
+  margin: var(--s-7) 0 var(--s-3);
+}
+.rp-table { border: 1px solid var(--rule); border-radius: var(--radius-md); background: var(--surface); }
+.rp-table .table th { white-space: nowrap; }
+.rp-col-share { width: 22%; min-width: 140px; }
+.rp-pct { font-size: var(--fs-2xs); width: 42px; text-align: right; flex-shrink: 0; }
+.rp-rank { width: 36px; }
+.rp-desc { min-width: 160px; max-width: 320px; overflow-wrap: anywhere; }
+.rp-mini { font-size: var(--fs-2xs); margin-top: 2px; }
+.rp-latest { margin-top: var(--s-3); }
+
+.rp-good { color: var(--success); }
+.rp-bad { color: var(--danger); }
+.rp-warn { color: var(--warning); }
+.rp-delta--flat { background: var(--paper-2); color: var(--ink-3); }
+.stat--accent .rp-delta--flat { background: color-mix(in srgb, var(--paper) 14%, transparent); color: inherit; }
+
+.rp-foot { font-size: var(--fs-xs); color: var(--ink-3); margin-top: var(--s-3); }
+.rp-empty {
+  display: flex; align-items: center; gap: var(--s-2);
+  font-size: var(--fs-sm); color: var(--ink-3); padding: var(--s-6) 0; justify-content: center; text-align: center;
+}
+.rp-empty svg { width: 16px; height: 16px; flex-shrink: 0; }
+
+/* ---------- Responsive ---------- */
+@media (max-width: 1024px) {
+  .rp-grid { grid-template-columns: minmax(0, 1fr); }
+  .rp-cmp { margin-left: 0; }
+}
+@media (max-width: 640px) {
+  .rp-bar { gap: var(--s-3); }
+  .rp-bar .segmented { width: 100%; overflow-x: auto; }
+  .rp-bar .segmented button { flex: 1 0 auto; min-height: 40px; }
+  .rp-nav { width: 100%; justify-content: space-between; }
+  .rp-nav__title { flex: 1; font-size: var(--fs-md); min-width: 0; }
+  .rp-custom .input { flex: 1 1 130px; min-width: 0; min-height: 40px; }
+  .rp-sec { padding: var(--s-7) 0 var(--s-6); }
+  .rp-sec__head { grid-template-columns: minmax(0, 1fr) auto; }
+  .rp-sec__num { grid-column: 1 / -1; padding-top: 0; }
+  .rp-sec__titles h2 { font-size: var(--fs-xl); }
+  .rp-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-3); }
+  .rp-tiles--stack { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rp-fig { padding: var(--s-3) var(--s-4) var(--s-4); }
+}
+@media (max-width: 380px) {
+  .rp-tiles { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* =====================================================================
+   Print / "Lưu PDF" — active while the Reports page sets
+   <html data-print="report"> around window.print().
+   ===================================================================== */
+@media print {
+  @page { size: A4; margin: 14mm 12mm 16mm; }
+
+  :root[data-print='report'] {
+    color-scheme: light;
+    --paper: #ffffff; --paper-2: #f3f1ec; --surface: #ffffff; --surface-2: #f7f5f0;
+    --ink: #111111; --ink-2: #333333; --ink-3: #5d5d5d; --ink-4: #8a8a8a;
+    --rule: #d6d2c8; --rule-strong: #b8b2a5;
+    --accent: #a4481f; --accent-ink: #8f3d1b; --accent-soft: #f6e7dc;
+    --shadow-1: none; --shadow-2: none;
+  }
+  :root[data-print='report'] body {
+    background: var(--paper) !important; color: var(--ink);
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  :root[data-print='report'] body::before,
+  :root[data-print='report'] body::after { display: none !important; }
+
+  /* Hide the app chrome — only the report article is printed. */
+  :root[data-print='report'] .sidebar,
+  :root[data-print='report'] .topbar,
+  :root[data-print='report'] .scrim,
+  :root[data-print='report'] .toasts,
+  :root[data-print='report'] .page-head,
+  :root[data-print='report'] .rp-bar,
+  :root[data-print='report'] .rp-range,
+  :root[data-print='report'] .rp-noprint,
+  :root[data-print='report'] nav,
+  :root[data-print='report'] dialog { display: none !important; }
+  :root[data-print='report'] .shell,
+  :root[data-print='report'] .main,
+  :root[data-print='report'] .content {
+    display: block !important; margin: 0 !important; padding: 0 !important;
+    max-width: none !important; width: auto !important; min-height: 0 !important;
+    grid-template-columns: none !important; overflow: visible !important; animation: none !important;
+  }
+
+  :root[data-print='report'] .rp-print-head {
+    display: block; padding-bottom: 6mm; margin-bottom: 2mm; border-bottom: 1.5px solid var(--ink);
+  }
+  :root[data-print='report'] .rp-print-head h1 { font-family: var(--font-display); font-weight: 400; font-size: 24pt; margin: 2mm 0 1mm; }
+  :root[data-print='report'] .rp-print-head p { font-family: var(--font-mono); font-size: 8.5pt; color: var(--ink-3); }
+
+  :root[data-print='report'] .report { font-size: 10pt; }
+  :root[data-print='report'] .rp-sec { padding: 6mm 0 5mm; break-inside: auto; }
+  :root[data-print='report'] .rp-sec__head { margin-bottom: 4mm; break-after: avoid; }
+  :root[data-print='report'] .rp-sec__titles h2 { font-size: 16pt; }
+  :root[data-print='report'] .rp-sec__titles p { font-size: 8.5pt; }
+  :root[data-print='report'] .rp-lede { font-size: 12pt; line-height: 1.55; }
+  :root[data-print='report'] .rp-tip { background: none; border-left-width: 1.5px; }
+
+  :root[data-print='report'] .rp-tiles { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 3mm; margin-bottom: 4mm; }
+  :root[data-print='report'] .rp-tiles--stack { grid-template-columns: minmax(0, 1fr); }
+  :root[data-print='report'] .stat { padding: 3mm; border: 1px solid var(--rule); box-shadow: none; break-inside: avoid; }
+  :root[data-print='report'] .stat--accent { background: #fff; color: var(--ink); border-color: var(--ink); }
+  :root[data-print='report'] .stat--accent .eyebrow,
+  :root[data-print='report'] .stat--accent .stat__meta { color: var(--ink-3); }
+  :root[data-print='report'] .stat__icon { display: none; }
+  :root[data-print='report'] .stat__value { font-size: 18pt; }
+  :root[data-print='report'] .rp-val--sm { font-size: 12pt !important; }
+
+  :root[data-print='report'] .rp-grid { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 4mm; }
+  :root[data-print='report'] .rp-fig { padding: 3mm; border-color: var(--rule); break-inside: avoid; }
+  :root[data-print='report'] .chart-box { height: auto !important; }
+  :root[data-print='report'] canvas { width: 100% !important; height: auto !important; }
+
+  :root[data-print='report'] .rp-table { border: 0; overflow: visible; }
+  :root[data-print='report'] .table { font-size: 8.5pt; }
+  :root[data-print='report'] .table th,
+  :root[data-print='report'] .table td { padding: 1.6mm 2mm; }
+  :root[data-print='report'] .table tr { break-inside: avoid; }
+  :root[data-print='report'] .table thead { display: table-header-group; }
+  :root[data-print='report'] .rp-sub { font-size: 12pt; margin: 5mm 0 2mm; break-after: avoid; }
+  :root[data-print='report'] .delta,
+  :root[data-print='report'] .badge { border: 1px solid currentColor; }
+}

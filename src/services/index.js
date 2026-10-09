@@ -12,3 +12,4 @@ export * as kpis from './kpis.js';
 export * as activity from './activity.js';
 export * as dashboard from './dashboard.js';
 export * as reports from './reports.js';
+export * as notes from './notes.js';
