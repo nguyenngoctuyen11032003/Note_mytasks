@@ -378,11 +378,8 @@ export default async function dashboard(root, { signal } = {}) {
     let rows = null;
     try {
       const mod = await import('../services/notes.js');
-      // Service orders pinned first; "recent" means last edited.
-      rows = ((await mod.listNotes({ limit: 40 })) || [])
-        .slice()
-        .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))
-        .slice(0, 4);
+      // "Recent" means last edited: let the server order and stop at 4 (was 40 full notes).
+      rows = ((await mod.listNotes({ limit: 4, recent: true })) || []).slice(0, 4);
     } catch (e) {
       console.warn('[dashboard] notes', e?.message || e);
     }
@@ -736,7 +733,11 @@ export default async function dashboard(root, { signal } = {}) {
       </ol>`);
   }
 
-  disposers.push(onDataChanged(() => load()));
+  // Coalesce bursts (complete + undo, quick-add, settings saving several kinds)
+  // into one reload: each reload is 12 requests and three charts.
+  let reloadTimer = null;
+  disposers.push(() => clearTimeout(reloadTimer));
+  disposers.push(onDataChanged(() => { clearTimeout(reloadTimer); reloadTimer = setTimeout(load, 350); }));
   await load();
 
   return () => {

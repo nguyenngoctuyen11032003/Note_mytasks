@@ -1,5 +1,7 @@
 /* Per-page style sheets (one owner each) */
 @import './pages/notes.css';
+@import './pages/notes-mobile.css'; /* phone: chips, swipe rows, keyboard-aware format bar */
+@import './rich.css'; /* rich editor content + images (A5) + recorder (A6) */
 @import './pages/tasks.css';
 @import './pages/dashboard.css';
 @import './pages/calendar.css';

@@ -1,0 +1,102 @@
+/* Meeting recorder dialog (src/components/rich/recorder.js) — stream A6.
+   Imported by src/css/rich.css (A7). Uses only design tokens. */
+
+.rec { width: min(600px, calc(100vw - 24px)); }
+/* component classes (.btn, .rec__opts…) set display; the hidden attribute must win */
+.rec [hidden] { display: none !important; }
+.rec__body { display: flex; flex-direction: column; gap: var(--s-4); }
+
+/* ---------- stage: dot · timer · status · meter ---------- */
+.rec__stage {
+  display: grid; grid-template-columns: auto 1fr; align-items: center;
+  column-gap: var(--s-3); row-gap: var(--s-2);
+  padding: var(--s-4) var(--s-5); border: 1px solid var(--rule); border-radius: var(--radius-md);
+  background: var(--surface-sunk);
+}
+.rec__dot {
+  width: 12px; height: 12px; border-radius: 50%; background: var(--ink-4);
+  grid-row: 1; grid-column: 1;
+}
+.rec[data-state='recording'] .rec__dot { background: var(--danger); animation: rec-pulse 1.4s var(--ease-in-out) infinite; }
+.rec[data-state='paused'] .rec__dot { background: var(--warning); }
+.rec[data-state='stopped'] .rec__dot,
+.rec[data-state='saving'] .rec__dot { background: var(--success); }
+.rec[data-state='error'] .rec__dot { background: var(--danger); }
+@keyframes rec-pulse { 50% { opacity: 0.35; } }
+
+.rec__timer {
+  grid-row: 1; grid-column: 2;
+  font-family: var(--font-display); font-size: var(--fs-3xl); line-height: 1.1; font-weight: 300;
+  font-variant-numeric: tabular-nums; letter-spacing: -0.02em; color: var(--ink);
+}
+.rec[data-state='paused'] .rec__timer { color: var(--ink-3); }
+.rec__status { grid-column: 1 / -1; font-size: var(--fs-sm); color: var(--ink-2); }
+
+.rec__meter {
+  --level: 0;
+  grid-column: 1 / -1; position: relative; height: 6px; border-radius: var(--radius-pill);
+  background: var(--rule); overflow: hidden;
+}
+.rec__meter-fill {
+  position: absolute; inset: 0; transform-origin: left center;
+  transform: scaleX(var(--level)); background: var(--accent);
+  transition: transform 120ms linear;
+}
+.rec:not([data-state='recording']) .rec__meter { opacity: 0.4; }
+.rec__hint { grid-column: 1 / -1; margin: 0; font-size: var(--fs-xs); color: var(--warning); }
+
+/* ---------- messages ---------- */
+.rec__msg {
+  margin: 0; padding: var(--s-3) var(--s-4); border-radius: var(--radius-sm);
+  font-size: var(--fs-sm); color: var(--ink); background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+}
+.rec__msg[data-tone='warn'] { background: var(--warning-soft); border-color: color-mix(in srgb, var(--warning) 40%, transparent); }
+
+/* ---------- controls ---------- */
+.rec__controls { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.rec__controls .btn { min-height: 44px; }
+.rec__controls .btn svg { width: 18px; height: 18px; }
+.rec__start { flex: 1 1 auto; }
+
+/* ---------- options ---------- */
+.rec__opts { display: grid; gap: var(--s-3); }
+.rec__mic { margin: 0; }
+.rec__mic .select { width: 100%; }
+.rec__switch { display: inline-flex; align-items: center; gap: var(--s-2); min-height: 44px; cursor: pointer; font-size: var(--fs-sm); color: var(--ink); }
+.rec__switch input { width: 18px; height: 18px; accent-color: var(--accent); }
+.rec__switch input:disabled + span { color: var(--ink-3); }
+.rec__note { margin: 0; font-size: var(--fs-xs); line-height: 1.5; }
+
+.rec__preview { width: 100%; }
+
+/* ---------- transcript ---------- */
+.rec__transcript { display: flex; flex-direction: column; gap: var(--s-2); }
+.rec__tr-title { margin: 0; font-size: var(--fs-sm); font-weight: 600; }
+.rec__tr-title .muted { font-weight: 400; }
+.rec__lines {
+  list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-1);
+  max-height: 38dvh; overflow-y: auto; overscroll-behavior: contain;
+}
+.rec__line { display: flex; align-items: center; gap: var(--s-2); }
+.rec__ts { flex: none; font-size: var(--fs-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.rec__star { flex: none; }
+.rec__line-input.input { flex: 1; min-width: 0; height: 36px; font-size: var(--fs-sm); }
+.rec__line--mark .rec__line-input { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.rec__interim { margin: 0; min-height: 1.4em; font-size: var(--fs-sm); color: var(--ink-4); font-style: italic; }
+.rec__interim:empty { display: none; }
+.rec__empty { margin: 0; font-size: var(--fs-xs); }
+
+.rec__foot { flex-wrap: wrap; }
+
+@media (max-width: 560px) {
+  .rec__timer { font-size: var(--fs-2xl); }
+  .rec__controls .btn { flex: 1 1 calc(50% - var(--s-2)); }
+  .rec__foot .btn { flex: 1 1 auto; }
+  .rec__foot .grow { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rec[data-state='recording'] .rec__dot { animation: none; }
+  .rec__meter-fill { transition: none; }
+}

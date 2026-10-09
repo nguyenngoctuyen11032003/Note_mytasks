@@ -10,7 +10,7 @@ import { toast } from '../components/toast.js';
 import { setQuery } from '../core/router.js';
 import { onDataChanged, disposeOnAbort } from '../core/events.js';
 import {
-  listKpis, createKpi, updateKpi, deleteKpi, listAllRecords, addRecord, updateRecord, deleteRecord, forecastAll,
+  listKpis, createKpi, updateKpi, deleteKpi, listAllRecords, addRecord, updateRecord, deleteRecord, forecastAll, progress,
 } from '../services/kpis.js';
 import { today, diffDays, addDays, addMonths, startOfMonth, endOfMonth } from '../utils/date.js';
 import { dec, day, pct, num } from '../utils/format.js';
@@ -608,10 +608,12 @@ export default async function kpiPage(root, { query, signal }) {
   async function load() {
     const my = ++seq;
     try {
+      // The server forecast needs neither list: start it with them, not after.
+      const server = progress(null).catch(() => null);
       const [ks, rs] = await Promise.all([listKpis(), listAllRecords()]);
       const recs = rs.map((r) => ({ ...r, value: Number(r.value) }));
       const list = ks.map((k) => ({ ...k, target_value: Number(k.target_value), current_value: Number(k.current_value) }));
-      const forecast = await forecastAll(list, recs, today());
+      const forecast = await forecastAll(list, recs, today(), { server });
       if (my !== seq) return;
       kpis = list;
       records = recs;

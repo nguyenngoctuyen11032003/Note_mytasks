@@ -7,11 +7,12 @@
     <meta name="theme-color" content="#180a06" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#180a06" media="(prefers-color-scheme: dark)" />
     <meta name="description" content="Stratos — hệ sinh thái cá nhân: ghi chú, công việc, thời gian, KPI và chi tiêu." />
-    <link rel="icon" href="./favicon.ico" sizes="48x48" />
-    <link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32.png" />
-    <link rel="icon" type="image/png" sizes="16x16" href="./icons/favicon-16.png" />
-    <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
-    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <link rel="icon" href="./favicon.ico?v=stratos2" sizes="48x48" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32.png?v=stratos2" />
+    <link rel="icon" type="image/png" sizes="16x16" href="./icons/favicon-16.png?v=stratos2" />
+    <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png?v=stratos2" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png?v=stratos2" />
+    <link rel="preload" as="image" href="./icons/logo-mark.png?v=stratos2" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <meta name="application-name" content="Stratos" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -21,10 +22,16 @@
     <meta name="format-detection" content="telephone=no" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Non-blocking: a third-party stylesheet in <head> would hold the first
+         paint (even the boot splash) until Google answers. display=swap +
+         the system-font fallback in tokens.css cover the gap. -->
     <link
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&family=Inter+Tight:wght@500..700&display=swap"
+      media="print"
+      onload="this.media='all'"
     />
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&family=Inter+Tight:wght@500..700&display=swap" /></noscript>
     <title>Stratos</title>
     <script>
       // Apply the stored theme before first paint to avoid a flash.
@@ -37,11 +44,29 @@
         if (localStorage.getItem('nm.sidebar') === 'rail') document.documentElement.dataset.sidebar = 'rail';
       } catch (e) {}
     </script>
+    <style>
+      /* Boot splash — inline so it is styled on the very first paint (the app
+         CSS only arrives with the JS bundle). Colours mirror tokens.css. */
+      /* :where() = zero specificity, so the app's own CSS wins once it loads. */
+      :where(html, body) { margin: 0; background: #180a06; }
+      :where(html[data-theme='light'], html[data-theme='light'] body) { background: #f3ebe1; }
+      @media (prefers-color-scheme: light) { :where(html:not([data-theme='dark']), html:not([data-theme='dark']) body) { background: #f3ebe1; } }
+      .boot { min-height: 100dvh; display: grid; place-content: center; justify-items: center; gap: 14px;
+              background: #180a06; color: #ede4d8; font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; }
+      :where(html[data-theme='light']) .boot { background: #f3ebe1; color: #24140c; }
+      @media (prefers-color-scheme: light) { :where(html:not([data-theme='dark'])) .boot { background: #f3ebe1; color: #24140c; } }
+      .boot__logo { width: 64px; height: auto; animation: boot-breathe 1.8s ease-in-out infinite; }
+      .boot__name { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+      .boot__line { width: 96px; height: 2px; border-radius: 2px; background: currentColor; opacity: 0.15; }
+      @keyframes boot-breathe { 50% { transform: scale(0.94); opacity: 0.8; } }
+      @media (prefers-reduced-motion: reduce) { .boot__logo { animation: none; } }
+    </style>
   </head>
   <body>
     <div id="app">
-      <div class="boot">
-        <span class="boot__mark">N</span>
+      <div class="boot" role="status" aria-label="Đang tải Stratos">
+        <img class="boot__logo" src="./icons/logo-mark.png?v=stratos2" alt="" width="64" height="72" style="width:64px;height:auto" />
+        <span class="boot__name">Stratos</span>
         <span class="boot__line"></span>
       </div>
     </div>

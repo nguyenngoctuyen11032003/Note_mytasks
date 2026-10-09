@@ -16,6 +16,11 @@ import { time as fmtTime, relDay, dateTime, num, monthLabel, ago } from '../util
 import * as N from '../services/notes.js';
 import { listTasks, getTask, createTask, OPEN_STATUSES } from '../services/tasks.js';
 import * as E from '../components/noteEditor.js';
+import * as M from '../services/noteMedia.js';
+import { createRichEditor } from '../components/rich/editor.js';
+import * as IMG from '../components/rich/images.js';
+import * as REC from '../components/rich/recorder.js';
+import { bindRowGestures, trackKeyboard } from './notesMobile.js';
 
 const VIEWS = [
   { id: 'all', label: 'Tất cả ghi chú', icon: 'note' },
@@ -32,7 +37,18 @@ const SORTS = [
   { id: 'created', label: 'Ngày tạo' },
   { id: 'title', label: 'Tiêu đề A–Z' },
 ];
-const MODES = ['edit', 'preview', 'split'];
+// edit = WYSIWYG (rich editor) · source = Markdown textarea · preview = read-only render.
+const MODES = ['edit', 'source', 'preview'];
+const MODE_LABEL = { edit: 'Soạn thảo', source: 'Markdown', preview: 'Xem' };
+const CASES = [
+  { id: 'upper', label: 'CHỮ HOA' },
+  { id: 'lower', label: 'chữ thường' },
+  { id: 'title', label: 'Viết Hoa Mỗi Từ' },
+  { id: 'sentence', label: 'Viết hoa đầu câu' },
+];
+const PRUNE_DELAY = 60_000; // media no longer referenced is removed after a quiet minute (or on leave)
+/** nm-media: references in Markdown (images and audio links). */
+const mediaRefs = (md) => new Set(String(md || '').match(/nm-media:[^\s)"']+/g) || []);
 const STATUS_TEXT = { saved: 'Đã lưu', dirty: 'Chưa lưu', saving: 'Đang lưu…', error: 'Lỗi lưu · thử lại' };
 const LS_LAYOUT = 'nm.notes.layout';
 const LS_MODE = 'nm.notes.mode';
@@ -53,7 +69,9 @@ export default async function notesPage(root, { query, signal }) {
   };
   if (f.nb) f.view = 'nb';
   else if (f.tag) f.view = 'tag';
+  // A stored 'split' (old editor) or anything unknown falls back to 'edit'.
   let mode = MODES.includes(store.get(LS_MODE)) ? store.get(LS_MODE) : 'edit';
+  let editMode = mode === 'source' ? 'source' : 'edit'; // where Ctrl+/ returns from preview
 
   let notes = [];
   let overview = null;
@@ -69,6 +87,19 @@ export default async function notesPage(root, { query, signal }) {
   const taskCache = new Map();
   const disposers = [];
   disposeOnAbort(signal, disposers); // released on navigation even if this page never returns
+  let ed = null;           // rich editor of `cur` (null when read-only / no note)
+  let edNote = null;       // the note `ed` was created for
+  let edMd = '';           // last Markdown known to be inside `ed`
+  let edSrc = null;        // the content last loaded into `ed` (before its normalisation)
+  let edState = null;      // last activeState() from the editor
+  let imgUi = null;        // bindImageUi() handle
+  let recorder = null;     // open recorder dialog
+  let findUi = null;       // find & replace state
+  let savedRefs = new Set(); // media referenced by the last saved content of `cur`
+  const pruneIds = new Set(); // note ids whose Storage folder may hold unreferenced media
+  let uploads = 0;         // in-flight media uploads (no pruning meanwhile)
+  let pruneTimer = null;
+  disposers.push(() => { destroyEditor(); clearTimeout(pruneTimer); });
 
   mount(root, html`
     <div class="nb-page">
@@ -84,8 +115,9 @@ export default async function notesPage(root, { query, signal }) {
         <section class="nb-list" aria-label="Danh sách ghi chú">
           <header class="nb-list__head" data-listhead></header>
           <div class="nb-search">
-            <div class="input-group">${icon('search')}<input class="input" type="search" data-search placeholder="Tìm tiêu đề, nội dung, #thẻ…" value="${f.q}" aria-label="Tìm ghi chú" autocomplete="off" /></div>
+            <div class="input-group">${icon('search')}<input class="input" type="search" data-search placeholder="Tìm tiêu đề, nội dung, #thẻ…" value="${f.q}" aria-label="Tìm ghi chú" autocomplete="off" enterkeyhint="search" /></div>
           </div>
+          <nav class="nb-chips" data-chips aria-label="Lọc nhanh"></nav>
           <div class="nb-list__scroll" data-items>${loadingRows(5)}</div>
         </section>
         <section class="nb-editor" data-editor aria-label="Trình soạn thảo ghi chú"></section>
@@ -254,6 +286,24 @@ export default async function notesPage(root, { query, signal }) {
           : html`<p class="nb-side__hint">Thêm thẻ cho ghi chú để lọc nhanh theo chủ đề.</p>`}
       </div>
       ${err ? html`<p class="nb-side__hint danger-text">Không tải được thư viện.</p>` : ''}`);
+    renderChips();
+  }
+
+  /** Phones: the library's views and notebooks as one scrollable chip row (no drawer trip). */
+  function renderChips() {
+    const box = $('[data-chips]');
+    if (!box) return;
+    const c = overview?.counts || {};
+    const count = (n) => (n ? html`<span>${num(n)}</span>` : '');
+    mount(box, html`
+      ${VIEWS.filter((v) => v.id !== 'trash' || c.trash).map((v) => html`
+        <button type="button" class="nb-chip-f ${f.view === v.id ? 'is-on' : ''}" data-view="${v.id}" aria-pressed="${f.view === v.id}">${v.id === 'all' ? 'Tất cả' : v.label}${v.id === 'all' ? '' : count(c[v.id])}</button>`)}
+      ${(overview?.notebooks || []).map((nb) => html`
+        <button type="button" class="nb-chip-f ${f.view === 'nb' && f.nb === nb.name ? 'is-on' : ''}" data-nb="${nb.name}" aria-pressed="${f.view === 'nb' && f.nb === nb.name}">${icon('folder')}${nb.name}</button>`)}
+      ${f.view === 'tag' ? html`<button type="button" class="nb-chip-f is-on" data-tagf="${f.tag}" aria-pressed="true" aria-label="Bỏ lọc thẻ ${f.tag}">#${f.tag}${icon('x')}</button>` : ''}`);
+    // Keep the active chip in view without scrolling the page itself.
+    const on = box.querySelector('.is-on');
+    if (on) box.scrollLeft = Math.max(0, on.offsetLeft - (box.clientWidth - on.offsetWidth) / 2);
   }
 
   async function loadOverview() {
@@ -403,6 +453,7 @@ export default async function notesPage(root, { query, signal }) {
 
   async function flush() {
     clearTimeout(saveTimer);
+    syncEditor(); // the editor's onChange is debounced: take its latest Markdown now
     while (saving) await saving;
     if (!cur || !Object.keys(pending).length) return;
     const note = cur;
@@ -414,6 +465,11 @@ export default async function notesPage(root, { query, signal }) {
       try {
         const saved = await N.updateNote(note.id, patch);
         note.updated_at = saved.updated_at;
+        if ('content' in patch && cur === note) {
+          const refs = mediaRefs(patch.content);
+          if ([...savedRefs].some((u) => !refs.has(u))) schedulePrune(note.id); // a save that removed media
+          savedRefs = refs;
+        }
         if (cur === note && !Object.keys(pending).length) setStatus('saved');
         updateItem(note);
         renderFoot();
@@ -429,18 +485,77 @@ export default async function notesPage(root, { query, signal }) {
     await saving;
   }
 
-  const isBlank = (n) => !String(n.title || '').trim() && !E.plainText(n.content).replace(/[☐•\s]/g, '') && !(n.tags || []).length && !n.task_id;
+  const isBlank = (n) => !String(n.title || '').trim() && !E.plainText(n.content).replace(/[☐•\s]/g, '')
+    && !mediaRefs(n.content).size && !/!\[[^\]]*\]\(/.test(n.content || '') && !(n.tags || []).length && !n.task_id;
+
+  /* ---------- media lifecycle (best effort: Storage problems never block notes) ---------- */
+  function schedulePrune(id) {
+    if (id) pruneIds.add(id);
+    clearTimeout(pruneTimer);
+    pruneTimer = setTimeout(() => runPrune(), PRUNE_DELAY);
+  }
+  /**
+   * Remove Storage files a note no longer references (marked notes, or only `onlyId`).
+   * Always decides on the content saved on the server (unsaved / discarded edits never
+   * count). The note still open is skipped: Ctrl+Z may bring a removed image back, so
+   * its files are pruned once the user leaves it (leaveCurrent / page exit).
+   */
+  async function runPrune(onlyId) {
+    if (uploads > 0) { schedulePrune(); return; }
+    for (const id of [...pruneIds]) {
+      if (onlyId ? id !== onlyId : cur?.id === id) continue;
+      try {
+        const n = await N.getNote(id);
+        pruneIds.delete(id);
+        if (n) await M.pruneUnused?.(id, n.content);
+      } catch { /* best effort */ }
+    }
+  }
+  function dropMedia(ids) {
+    for (const id of [].concat(ids)) {
+      pruneIds.delete(id);
+      Promise.resolve().then(() => M.deleteNoteMedia?.(id)).catch(() => {});
+    }
+  }
+  /** Upload wrappers bound to a note: count in-flight uploads, mark the note for pruning. */
+  function trackUpload(id, run) {
+    uploads++;
+    return Promise.resolve().then(run).finally(() => { uploads--; schedulePrune(id); });
+  }
+/** Markdown referencing other notes' nm-media: files → copies under note `id` (links whose copy failed stay unchanged). */
+  function copyMediaInto(id, md) {
+    if (!/nm-media:/.test(md || '')) return md;
+    return trackUpload(id, () => M.copyNoteMedia(md, id)).catch((err) => {
+      console.warn('[notes] copyNoteMedia', err);
+      return typeof err?.details?.markdown === 'string' ? err.details.markdown : md; // keep the copies already made
+    });
+  }
+  const uploadImageFor = (id) => (file, opts) => trackUpload(id, () => M.uploadImage(id, file, opts));
+  // recorder.js may call uploadAudio(blob, opts) or the service form uploadAudio(noteId, blob, opts).
+  const uploadAudioFor = (id) => (a, b, c) => trackUpload(id, () => (typeof a === 'string' ? M.uploadAudio(a, b, c) : M.uploadAudio(id, a, b)));
+  function mediaError(err) {
+    toast.error(err?.code === 'storage_unavailable' ? 'Kho lưu trữ ảnh/ghi âm chưa sẵn sàng. Hãy thử lại sau.' : err);
+  }
+
+  const confirmDropUnsaved = () => confirmDialog({
+    title: 'Chưa lưu được thay đổi',
+    message: 'Thay đổi gần nhất chưa được lưu (có thể do mất kết nối). Rời ghi chú này và bỏ thay đổi đó?',
+    confirmLabel: 'Bỏ thay đổi',
+  });
+
+  /** Flush before an action removes note `id` from the list; false = keep it (unsaved edits kept). */
+  async function settleBeforeDrop(id) {
+    await flush();
+    if (cur?.id !== id || !Object.keys(pending).length) return true;
+    return !!(await confirmDropUnsaved());
+  }
 
   /** Flush, then release the current note (discarding a brand-new blank one). */
   async function leaveCurrent() {
     if (!cur) return true;
     await flush();
     if (Object.keys(pending).length) {
-      const ok = await confirmDialog({
-        title: 'Chưa lưu được thay đổi',
-        message: 'Thay đổi gần nhất chưa được lưu (có thể do mất kết nối). Rời ghi chú này và bỏ thay đổi đó?',
-        confirmLabel: 'Bỏ thay đổi',
-      });
+      const ok = await confirmDropUnsaved();
       if (!ok) return false;
       pending = {};
     }
@@ -449,7 +564,10 @@ export default async function notesPage(root, { query, signal }) {
       freshId = null;
       notes = notes.filter((x) => x.id !== old.id);
       $(`[data-items] [data-id="${old.id}"]`)?.remove();
-      N.deleteNote(old.id).then(loadOverview).catch(() => {});
+      pruneIds.delete(old.id);
+      N.deleteNote(old.id).then(() => { dropMedia(old.id); loadOverview(); }).catch(() => {});
+    } else if (pruneIds.has(old.id)) {
+      setTimeout(() => runPrune(old.id), 1500);
     }
     setStatus('saved');
     return true;
@@ -458,8 +576,16 @@ export default async function notesPage(root, { query, signal }) {
   /* ================================================================
      Editor pane
      ================================================================ */
-  function renderPreview() {
-    return cur.content.trim() ? E.renderMarkdown(cur.content) : html`<p class="nb-preview__empty">Chưa có nội dung để xem trước.</p>`;
+  const bodyMode = () => $('[data-body]')?.dataset.mode || null;
+  const hydrate = (el) => { if (el) Promise.resolve().then(() => M.hydrateMedia?.(el)).catch(() => {}); };
+
+  /** Read-only render + signed URLs for nm-media: images / audio. */
+  function mountPreview() {
+    const pv = $('[data-preview]');
+    if (!pv || !cur) return;
+    mount(pv, cur.content.trim() ? E.renderMarkdown(cur.content) : html`<p class="nb-preview__empty">Chưa có nội dung để xem trước.</p>`);
+    if (cur.trashed_at) pv.querySelectorAll('input[type=checkbox]').forEach((c) => { c.disabled = true; });
+    hydrate(pv);
   }
 
   function renderFoot() {
@@ -490,10 +616,11 @@ export default async function notesPage(root, { query, signal }) {
         })}
         <dl class="nb-keys" aria-label="Phím tắt">
           <div><dt><kbd>N</kbd></dt><dd>Ghi chú mới</dd></div>
-          <div><dt><kbd>/</kbd></dt><dd>Tìm kiếm</dd></div>
-          <div><dt><kbd>Ctrl</kbd><kbd>B</kbd> · <kbd>I</kbd> · <kbd>K</kbd></dt><dd>Đậm · nghiêng · liên kết</dd></div>
+          <div><dt><kbd>/</kbd></dt><dd>Tìm ghi chú · trong bài: chèn khối</dd></div>
+          <div><dt><kbd>Ctrl</kbd><kbd>B</kbd> · <kbd>I</kbd> · <kbd>U</kbd></dt><dd>Đậm · nghiêng · gạch chân</dd></div>
           <div><dt><kbd>Ctrl</kbd><kbd>⇧</kbd><kbd>8</kbd> / <kbd>9</kbd></dt><dd>Danh sách · việc cần làm</dd></div>
-          <div><dt><kbd>Ctrl</kbd><kbd>/</kbd></dt><dd>Sửa ↔ Xem trước</dd></div>
+          <div><dt><kbd>Ctrl</kbd><kbd>F</kbd> · <kbd>H</kbd></dt><dd>Tìm · thay thế</dd></div>
+          <div><dt><kbd>Ctrl</kbd><kbd>/</kbd></dt><dd>Soạn thảo ↔ Xem</dd></div>
           <div><dt><kbd>Ctrl</kbd><kbd>S</kbd></dt><dd>Lưu ngay</dd></div>
         </dl>
       </div>`);
@@ -503,6 +630,8 @@ export default async function notesPage(root, { query, signal }) {
     tagObs?.disconnect();
     tagObs = null;
     E.closePopover();
+    closeFind({ restore: false });
+    destroyEditor();
     if (!cur) return renderEmptyEditor();
     const box = $('[data-editor]');
     delete box.dataset.empty;
@@ -519,11 +648,12 @@ export default async function notesPage(root, { query, signal }) {
         ${ro ? '' : html`<button type="button" class="nb-status" data-status data-act="save-now" data-state="saved" aria-live="polite"><i aria-hidden="true"></i><span>${STATUS_TEXT.saved}</span></button>`}
         <span class="grow"></span>
         ${ro ? '' : html`
-          <div class="segmented nb-mode" role="group" aria-label="Chế độ hiển thị">
-            <button type="button" data-mode="edit" aria-pressed="${m === 'edit'}" title="Soạn thảo">${icon('edit')}<span>Sửa</span></button>
-            <button type="button" data-mode="preview" aria-pressed="${m === 'preview'}" title="Xem trước (Ctrl+/)">${icon('eye')}<span>Xem</span></button>
-            <button type="button" data-mode="split" class="nb-mode__split" aria-pressed="${m === 'split'}" title="Soạn và xem song song">${icon('board')}<span>Song song</span></button>
+          <div class="segmented nb-mode" role="group" aria-label="Chế độ soạn thảo">
+            <button type="button" data-mode="edit" aria-pressed="${m === 'edit'}" aria-label="${MODE_LABEL.edit}" title="Soạn thảo trực quan">${icon('edit')}<span>${MODE_LABEL.edit}</span></button>
+            <button type="button" data-mode="source" aria-pressed="${m === 'source'}" aria-label="${MODE_LABEL.source}" title="Sửa trực tiếp mã Markdown"><b class="nb-mode__md" aria-hidden="true">M↓</b><span>${MODE_LABEL.source}</span></button>
+            <button type="button" data-mode="preview" aria-pressed="${m === 'preview'}" aria-label="${MODE_LABEL.preview}" title="Xem (Ctrl+/)">${icon('eye')}<span>${MODE_LABEL.preview}</span></button>
           </div>
+          <button type="button" class="icon-btn nb-modebtn" data-act="mode-toggle" aria-label="Chuyển giữa Xem và Soạn thảo" title="Xem ↔ Soạn thảo">${icon('eye')}${icon('edit')}</button>
           <button type="button" class="icon-btn nb-pinbtn" data-act="pin" aria-pressed="${n.pinned}" aria-label="${n.pinned ? 'Bỏ ghim' : 'Ghim lên đầu'}" title="${n.pinned ? 'Bỏ ghim' : 'Ghim lên đầu'}">${icon('pin')}</button>
           <button type="button" class="icon-btn" data-act="color" aria-label="Nhãn màu" title="Nhãn màu" aria-haspopup="dialog"><span class="nb-swatch ${n.color ? 'has-color' : ''}" data-swatch style="${n.color ? `--c:${n.color}` : ''}"></span></button>`}
         <button type="button" class="icon-btn" data-act="more" aria-label="Thêm thao tác" aria-haspopup="menu">${icon('more')}</button>
@@ -531,7 +661,9 @@ export default async function notesPage(root, { query, signal }) {
       ${ro
         ? html`<div class="nb-banner nb-banner--danger">${icon('trash')}<span>Ghi chú đang ở Thùng rác · chỉ xem.</span><span class="grow"></span><button type="button" class="btn btn--sm" data-act="restore">${icon('undo')} Khôi phục</button><button type="button" class="btn btn--sm btn--danger-ghost" data-act="destroy">Xóa vĩnh viễn</button></div>`
         : n.archived ? html`<div class="nb-banner">${icon('archive')}<span>Ghi chú đã lưu trữ.</span><span class="grow"></span><button type="button" class="btn btn--sm" data-act="archive">Bỏ lưu trữ</button></div>` : ''}
-      ${ro ? '' : html`<div class="nb-tools" role="toolbar" aria-label="Định dạng Markdown">${E.toolbarTpl()}</div>`}
+      ${ro ? '' : html`
+        <div class="nb-tools" role="toolbar" aria-label="Định dạng văn bản" aria-orientation="horizontal" data-tools>${E.toolbarTpl()}</div>
+        <div class="nb-find" data-find role="search" aria-label="Tìm và thay thế trong ghi chú" hidden></div>`}
       <div class="nb-ed__scroll" data-scroll>
         <div class="nb-ed__sheet" style="${n.color ? `--c:${n.color}` : ''}">
           <div class="nb-ed__eyebrow">
@@ -548,18 +680,27 @@ export default async function notesPage(root, { query, signal }) {
             <span class="nb-taskslot" data-taskslot></span>
           </div>
           <div class="nb-body" data-body data-mode="${m}">
-            ${ro ? '' : html`<textarea class="nb-text" data-field="content" maxlength="${N.NOTE_LIMITS.content}" spellcheck="true" placeholder="Bắt đầu viết…&#10;&#10;# Tiêu đề · **đậm** · _nghiêng_ · - [ ] việc cần làm · [liên kết](https://…)" aria-label="Nội dung ghi chú (Markdown)">${n.content}</textarea>`}
-            <article class="nb-preview md" data-preview>${m !== 'edit' ? renderPreview() : ''}</article>
+            ${ro ? '' : html`
+              <div class="nb-rich" data-rich></div>
+              <textarea class="nb-text" data-field="content" maxlength="${N.NOTE_LIMITS.content}" spellcheck="true" placeholder="Markdown: # Tiêu đề · **đậm** · _nghiêng_ · ++gạch chân++ · - [ ] việc cần làm · [liên kết](https://…)" aria-label="Nội dung ghi chú (mã Markdown)">${n.content}</textarea>`}
+            <article class="nb-preview md" data-preview></article>
           </div>
         </div>
       </div>
       <footer class="nb-ed__foot" data-foot></footer>`);
 
-    if (ro) root.querySelectorAll('[data-preview] input[type=checkbox]').forEach((c) => { c.disabled = true; });
-    else bindTags();
+    if (!ro) {
+      bindTags();
+      createEditor(n);
+      // Record button only where MediaRecorder works (the slash item still opens the dialog, which explains why).
+      if (REC.isRecordingSupported && !REC.isRecordingSupported()) $('[data-tool="record"]')?.setAttribute('hidden', '');
+    }
     setStatus(Object.keys(pending).length ? 'dirty' : 'saved');
     autosize($('.nb-title'));
-    autosize($('.nb-text'));
+    if (m === 'source') autosize($('.nb-text'));
+    if (m === 'preview') mountPreview();
+    paintTools(m === 'edit' ? safeState() : null);
+    watchTools();
     renderFoot();
     renderTaskSlot();
     $('[data-scroll]').scrollTop = 0;
@@ -568,16 +709,855 @@ export default async function notesPage(root, { query, signal }) {
       const t = $('.nb-title');
       t?.focus();
       t?.setSelectionRange(t.value.length, t.value.length);
-    } else if (focus === 'body' && m !== 'preview') {
+    } else if (focus === 'body') focusBody();
+  }
+
+  function focusBody() {
+    const m = bodyMode();
+    if (m === 'edit' && ed) { ed.focus(); return; }
+    if (m !== 'source') return;
+    const ta = $('.nb-text');
+    if (!ta) return;
+    const mm = ta.value.match(/(\*\* |- \[ \] |- |1\. |> )(?=\n|$)/);
+    const at = mm ? mm.index + mm[0].length : ta.value.length;
+    ta.focus();
+    ta.setSelectionRange(at, at);
+  }
+
+  /* ---------- rich editor lifecycle ---------- */
+  function safeState() {
+    if (!ed) return null;
+    try { return ed.state(); } catch { return null; }
+  }
+
+  function createEditor(n) {
+    const host = $('[data-rich]');
+    if (!host) return;
+    const note = n;
+    try {
+      ed = createRichEditor(host, {
+        markdown: n.content,
+        placeholder: 'Bắt đầu viết… Gõ “/” để chèn tiêu đề, danh sách, bảng, ảnh hay ghi âm.',
+        onChange: (md) => onEditorChange(note, md),
+        onSelectionChange: (st) => {
+          if (cur !== note || ed == null) return;
+          edState = st;
+          paintTools(st);
+        },
+        uploadImage: uploadImageFor(note.id),
+        // paste / drop of image files → images.js placeholders with progress
+        onImageFiles: (files, o) => (imgUi?.insert ? imgUi.insert(files, o) : null),
+        // Pasted Markdown that points at another note's files gets its own copies.
+        transformPastedMarkdown: (md) => copyMediaInto(note.id, md),
+      });
+    } catch (err) {
+      // The page stays usable in Markdown mode if the editor cannot start.
+      console.error(err);
+      ed = null;
+      return;
+    }
+    edNote = note;
+    edSrc = n.content;
+    try { edMd = ed.getMarkdown(); } catch { edMd = n.content; }
+    ed.el.classList.add('rt-content');
+    if (!ed.el.hasAttribute('aria-label')) ed.el.setAttribute('aria-label', 'Nội dung ghi chú');
+    ed.el.addEventListener('rt:request-image', onRequestImage);
+    ed.el.addEventListener('rt:request-record', onRequestRecord);
+    ed.el.addEventListener('rt:request-link', onRequestLink);
+    ed.el.addEventListener('rt:render', onRender);
+    try {
+      // images.js toasts its own upload errors.
+      imgUi = IMG.bindImageUi?.(ed, { uploadImage: uploadImageFor(note.id), onError: () => {} }) || null;
+    } catch (err) { console.error(err); imgUi = null; }
+    hydrate(ed.el);
+  }
+
+  function destroyEditor() {
+    syncEditor();
+    try { imgUi?.destroy?.(); } catch { /* ignore */ }
+    imgUi = null;
+    if (ed) {
+      ed.el?.removeEventListener('rt:request-image', onRequestImage);
+      ed.el?.removeEventListener('rt:request-record', onRequestRecord);
+      ed.el?.removeEventListener('rt:request-link', onRequestLink);
+      ed.el?.removeEventListener('rt:render', onRender);
+      try { ed.destroy(); } catch (err) { console.error(err); }
+    }
+    ed = null;
+    edNote = null;
+    edMd = '';
+    edSrc = null;
+    edState = null;
+    lastRange = null;
+  }
+
+  function onEditorChange(note, md) {
+    if (cur !== note || !ed || edNote !== note || bodyMode() !== 'edit') return;
+    edMd = md;
+    if (md !== cur.content) {
+      queue({ content: md });
+      refreshFoot();
+    }
+    paintHistory();
+    if (findUi) refindSoon();
+  }
+
+  /** Copy the editor's current Markdown into `cur` (onChange is debounced). */
+  function syncEditor() {
+    if (!ed || !cur || edNote !== cur || cur.trashed_at || bodyMode() !== 'edit') return;
+    let md;
+    try { md = ed.getMarkdown(); } catch { return; }
+    if (md === edMd) return;
+    edMd = md;
+    if (md !== cur.content) queue({ content: md });
+  }
+
+  /** Make the (hidden) editor show cur.content if it changed elsewhere (source / preview checkboxes). */
+  function loadEditorFromContent() {
+    if (!ed || edNote !== cur) return;
+    if (cur.content === edMd || cur.content === edSrc) return;
+    try {
+      ed.setMarkdown(cur.content, { history: 'push' }); // Ctrl+Z can undo edits made in Markdown mode
+      edSrc = cur.content;
+      edMd = ed.getMarkdown();
+    } catch (err) { console.error(err); }
+    hydrate(ed.el);
+  }
+
+  // Remember the last caret/selection inside the editor, so toolbar popovers (link,
+  // case menu) can put it back after focus moved to their inputs.
+  let lastRange = null;
+  const onSelChange = () => {
+    if (!ed) return;
+    const sel = document.getSelection();
+    if (sel?.rangeCount && ed.el.contains(sel.anchorNode)) lastRange = sel.getRangeAt(0).cloneRange();
+  };
+  document.addEventListener('selectionchange', onSelChange);
+  disposers.push(() => document.removeEventListener('selectionchange', onSelChange));
+
+  function restoreSel() {
+    if (!ed) return;
+    const sel = document.getSelection();
+    if (sel?.rangeCount && ed.el.contains(sel.anchorNode) && document.activeElement === ed.el) return;
+    if (lastRange && ed.el.contains(lastRange.startContainer)) {
+      ed.el.focus({ preventScroll: true });
+      sel.removeAllRanges();
+      sel.addRange(lastRange);
+    } else ed.focus();
+  }
+
+  /* ---------- modes ---------- */
+  function setMode(m, { focus = false } = {}) {
+    if (!MODES.includes(m) || !cur || cur.trashed_at) return;
+    const prev = bodyMode();
+    // Never lose text: take the outgoing surface's latest Markdown first.
+    if (prev === 'edit') syncEditor();
+    else if (prev === 'source') {
+      const ta = $('.nb-text');
+      if (ta && ta.value !== cur.content) queue({ content: ta.value });
+    }
+    mode = m;
+    if (m !== 'preview') editMode = m;
+    store.set(LS_MODE, m);
+    $('[data-editor]').dataset.mode = m;
+    const body = $('[data-body]');
+    if (body) body.dataset.mode = m;
+    root.querySelectorAll('.nb-mode [data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
+    if (m === 'preview') closeFind({ restore: false });
+    if (m === 'edit') {
+      loadEditorFromContent();
+      paintTools(safeState());
+      if (focus) ed?.focus();
+    } else if (m === 'source') {
       const ta = $('.nb-text');
       if (ta) {
-        const mm = ta.value.match(/(\*\* |- \[ \] |- |1\. |> )(?=\n|$)/);
-        const at = mm ? mm.index + mm[0].length : ta.value.length;
-        ta.focus();
-        ta.setSelectionRange(at, at);
+        if (ta.value !== cur.content) ta.value = cur.content;
+        autosize(ta);
+        if (focus) ta.focus();
       }
+      paintTools(null);
+    } else {
+      mountPreview();
+    }
+    if (findUi) runFind();
+  }
+
+  /* ---------- toolbar ---------- */
+  const PRESSED = {
+    bold: (s) => s.bold, italic: (s) => s.italic, underline: (s) => s.underline, strike: (s) => s.strike,
+    mark: (s) => s.mark, code: (s) => s.code || s.block === 'code', link: (s) => s.link,
+    h1: (s) => s.block === 'h1', h2: (s) => s.block === 'h2', h3: (s) => s.block === 'h3', quote: (s) => s.block === 'quote',
+    ul: (s) => s.list === 'ul', ol: (s) => s.list === 'ol', task: (s) => s.list === 'task',
+  };
+  function paintTools(st) {
+    const bar = $('[data-tools]');
+    if (!bar) return;
+    const s = st || {};
+    bar.querySelectorAll('[data-tool][aria-pressed]').forEach((b) => {
+      const v = String(Boolean(PRESSED[b.dataset.tool]?.(s)));
+      if (b.getAttribute('aria-pressed') !== v) b.setAttribute('aria-pressed', v);
+    });
+    const blk = bar.querySelector('[data-tool="block"]');
+    if (blk) {
+      const name = st ? BLOCK_LABEL[s.block] || BLOCK_LABEL.p : bodyMode() === 'source' ? BLOCK_LABEL[currentBlock()] : BLOCK_LABEL.p;
+      const lab = blk.querySelector('[data-block-label]');
+      if (lab && lab.textContent !== name) lab.textContent = name;
+      blk.setAttribute('aria-label', `Kiểu chữ: ${name}`);
+    }
+    bar.querySelector('[data-tool="more"]')?.classList.toggle('has-active', overflowTools().some((b) => b.getAttribute('aria-pressed') === 'true'));
+    paintHistory();
+  }
+  function paintHistory() {
+    const bar = $('[data-tools]');
+    if (!bar) return;
+    const rich = bodyMode() === 'edit' && ed;
+    const set = (id, can) => {
+      const b = bar.querySelector(`[data-tool="${id}"]`);
+      if (b && b.disabled === can) b.disabled = !can;
+    };
+    // Source mode uses the textarea's native undo stack (always offered).
+    set('undo', rich ? Boolean(ed.canUndo?.() ?? true) : true);
+    set('redo', rich ? Boolean(ed.canRedo?.() ?? true) : true);
+  }
+
+  function exec(cmd, ...args) {
+    if (!ed) return;
+    restoreSel();
+    try { ed.exec(cmd, ...args); } catch (err) { console.error(err); }
+    paintTools(safeState());
+  }
+
+  function runTool(id, el) {
+    if (!cur || cur.trashed_at) return;
+    if (id === 'more') return openMoreTools(el);
+    if (id === 'line-task') return taskFromLine();
+    if (id === 'find') return openFind({ replace: Boolean(findUi?.replace) });
+    if (id === 'block') {
+      if (bodyMode() === 'preview') setMode(editMode);
+      return openBlockMenu(el);
+    }
+    if (bodyMode() === 'preview') setMode(editMode);
+    if (bodyMode() === 'source') return sourceTool(id, el);
+    if (!ed) return;
+    switch (id) {
+      case 'bold': case 'italic': case 'underline': case 'strike': case 'mark': case 'code':
+        return exec('toggleMark', id);
+      case 'h1': case 'h2': case 'h3': case 'quote':
+        return exec('setBlock', id);
+      case 'ul': case 'ol': case 'task':
+        return exec('toggleList', id);
+      case 'hr': return exec('insertHr');
+      case 'table': return exec('insertTable', 3, 3);
+      case 'clear': return exec('clearFormatting');
+      case 'case': return openCaseMenu(el, (c) => exec('transformCase', c));
+      case 'link': return openLinkPopover(el);
+      case 'undo': ed.undo(); return paintTools(safeState());
+      case 'redo': ed.redo(); return paintTools(safeState());
+      case 'image': return insertImage();
+      case 'record': return startRecording();
     }
   }
+
+  /* ---------- "Kiểu chữ" (block style) menu and "⋯ Thêm" overflow menu ---------- */
+  const BLOCK_LABEL = Object.fromEntries(E.BLOCK_STYLES.map((b) => [b.id, b.label]));
+
+  /** role=menu popover; items: [{ id, label, checked?: bool|null, radio?, disabled? }]. */
+  function toolMenu(anchor, items, { label, onPick }) {
+    anchor.setAttribute('aria-expanded', 'true');
+    const pop = E.openPopover(anchor, html`
+      <div class="nb-tmenu" role="menu" aria-label="${label}">
+        ${items.map((it) => html`<button type="button" class="nb-tmenu__item" data-pick="${it.id}"
+          role="${it.checked == null ? 'menuitem' : it.radio ? 'menuitemradio' : 'menuitemcheckbox'}"
+          ${it.checked == null ? '' : raw(`aria-checked="${it.checked}"`)} ${it.disabled ? raw('disabled') : ''} tabindex="-1">
+          <span class="nb-tmenu__ico" aria-hidden="true">${it.glyph || ''}</span><span class="nb-tmenu__label">${it.label}</span>${it.keys ? html`<kbd>${it.keys}</kbd>` : ''}</button>`)}
+      </div>`, {
+      label,
+      className: 'nb-pop--menu',
+      onOpen: (el, close) => {
+        const btns = () => [...el.querySelectorAll('.nb-tmenu__item:not([disabled])')];
+        el.addEventListener('click', (e) => {
+          const b = e.target.closest('[data-pick]');
+          if (!b || b.disabled) return;
+          close();
+          onPick(b.dataset.pick);
+        });
+        el.addEventListener('keydown', (e) => {
+          const list = btns();
+          const i = list.indexOf(document.activeElement);
+          const go = (j) => { e.preventDefault(); list[(j + list.length) % list.length]?.focus(); };
+          if (e.key === 'ArrowDown') go(i + 1);
+          else if (e.key === 'ArrowUp') go(i - 1);
+          else if (e.key === 'Home') go(0);
+          else if (e.key === 'End') go(list.length - 1);
+          else if (e.key === 'Tab') { e.preventDefault(); close(); anchor.focus(); }
+        });
+        (el.querySelector('[aria-checked="true"]:not([disabled])') || btns()[0])?.focus();
+      },
+    });
+    // aria-expanded back to false whenever the popover goes away
+    const mo = new MutationObserver(() => { if (!pop.el.isConnected) { anchor.setAttribute('aria-expanded', 'false'); mo.disconnect(); } });
+    mo.observe(document.body, { childList: true });
+    return pop;
+  }
+
+  function currentBlock() {
+    if (bodyMode() === 'source') {
+      const ta = $('.nb-text');
+      const t = ta ? E.currentLine(ta).text : '';
+      const h = t.match(/^\s{0,3}(#{1,3})\s/);
+      return h ? `h${h[1].length}` : /^\s{0,3}>/.test(t) ? 'quote' : 'p';
+    }
+    return (safeState() || edState || {}).block || 'p';
+  }
+
+  function openBlockMenu(anchor) {
+    const curB = currentBlock();
+    toolMenu(anchor, E.BLOCK_STYLES.map((b) => ({ ...b, checked: b.id === curB, radio: true })), {
+      label: 'Kiểu chữ',
+      onPick: (id) => applyBlock(id),
+    });
+  }
+
+  function applyBlock(id) {
+    if (!cur || cur.trashed_at) return;
+    if (bodyMode() === 'preview') setMode(editMode);
+    if (bodyMode() === 'source') {
+      const ta = $('.nb-text');
+      if (!ta) return;
+      if (id === 'code') return E.insertBlock(ta, 'code');
+      if (id !== 'p') return currentBlock() === id ? undefined : E.toggleLines(ta, id);
+      const v = ta.value;
+      const ls = v.lastIndexOf('\n', ta.selectionStart - 1) + 1;
+      const { text } = E.currentLine(ta);
+      const plain = text.replace(/^\s{0,3}(#{1,6}\s+|>\s?)/, '');
+      if (plain !== text) E.replaceRange(ta, ls, ls + text.length, plain, ls + plain.length);
+      return;
+    }
+    if (!ed) return;
+    const st = safeState() || {};
+    if (id === 'p') { if (st.block && st.block !== 'p') exec('setBlock', st.block); return; } // toggling the current block returns to p
+    if (st.block === id) return;
+    exec('setBlock', id);
+  }
+
+  /** Tools currently moved into the overflow menu, in toolbar order. */
+  function overflowTools() {
+    const bar = $('[data-tools]');
+    return bar ? [...bar.querySelectorAll('[data-tool][data-overflow]')] : [];
+  }
+
+  function openMoreTools(anchor) {
+    const items = overflowTools().map((b) => ({
+      id: b.dataset.tool,
+      label: b.getAttribute('aria-label'),
+      glyph: raw(b.innerHTML),
+      checked: b.hasAttribute('aria-pressed') ? b.getAttribute('aria-pressed') === 'true' : null,
+      disabled: b.disabled,
+      keys: (b.title.match(/\(([^)]+)\)$/) || [])[1] || '',
+    }));
+    if (!items.length) return;
+    toolMenu(anchor, items, { label: 'Thêm công cụ', onPick: (id) => runTool(id, anchor) });
+  }
+
+  /**
+   * Priority+ toolbar (wide screens): one row; when it overflows, tools move into
+   * "⋯ Thêm", highest data-prio first (then right-most first). Phones keep the
+   * horizontally scrolling bar with every tool.
+   */
+  function fitTools() {
+    const bar = $('[data-tools]');
+    if (!bar || !bar.getClientRects().length) return;
+    const more = bar.querySelector('[data-tool="more"]');
+    const tools = [...bar.querySelectorAll('[data-tool]')].filter((b) => b !== more);
+    tools.forEach((b) => b.removeAttribute('data-overflow'));
+    if (more) more.hidden = true;
+    const fixSeps = () => {
+      let seenBtn = false;
+      let lastSep = null;
+      for (const n of bar.children) {
+        if (n.classList.contains('nb-tools__sep')) {
+          n.hidden = !seenBtn; // no leading / doubled separators
+          if (seenBtn) lastSep = n;
+          seenBtn = false;
+        } else if (n.getClientRects().length && n !== more) { seenBtn = true; lastSep = null; }
+      }
+      if (lastSep) lastSep.hidden = true; // nothing after it
+    };
+    fixSeps();
+    if (isPhone() || !more || bar.scrollWidth <= bar.clientWidth + 1) return;
+    more.hidden = false;
+    const order = tools
+      .map((b, i) => ({ b, i, p: Number(b.dataset.prio) || 0 }))
+      .filter((x) => x.p > 0 && x.b.getClientRects().length)
+      .sort((a, z) => z.p - a.p || z.i - a.i);
+    const moved = [];
+    for (const { b } of order) {
+      if (bar.scrollWidth <= bar.clientWidth + 1) break;
+      moved.push(b);
+      b.setAttribute('data-overflow', '');
+      if (b.tabIndex === 0) { b.tabIndex = -1; bar.querySelector('[data-tool]:not([data-overflow]):not([hidden])')?.setAttribute('tabindex', '0'); }
+      fixSeps();
+    }
+    // Second pass: give back the slack — a smaller, lower-priority tool may still fit.
+    for (const b of moved.reverse()) {
+      b.removeAttribute('data-overflow');
+      fixSeps();
+      if (bar.scrollWidth > bar.clientWidth + 1) { b.setAttribute('data-overflow', ''); fixSeps(); }
+    }
+    const pressed = overflowTools().some((b) => b.getAttribute('aria-pressed') === 'true');
+    more.classList.toggle('has-active', pressed); // a hidden active format still shows on "⋯"
+  }
+  let toolsRO = null;
+  function watchTools() {
+    toolsRO?.disconnect();
+    const bar = $('[data-tools]');
+    if (!bar || typeof ResizeObserver !== 'function') { fitTools(); return; }
+    let raf = 0;
+    toolsRO = new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(fitTools); });
+    toolsRO.observe(bar);
+    fitTools();
+  }
+  disposers.push(() => toolsRO?.disconnect());
+  const onPhoneChange = () => fitTools();
+  mqPhone.addEventListener('change', onPhoneChange);
+  disposers.push(() => mqPhone.removeEventListener('change', onPhoneChange));
+
+  function openCaseMenu(anchor, apply) {
+    popMenu(anchor, CASES.map((c) => ({ label: c.label, onClick: () => apply(c.id) })), { align: 'center' });
+  }
+
+  /** Normalise a typed link: bare domains get https://; only http(s)/mailto are accepted. */
+  function normalizeUrl(v) {
+    const s = String(v || '').trim();
+    if (!s) return '';
+    if (/^(https?:\/\/|mailto:)/i.test(s)) return s;
+    if (/^[\w.+-]+@[\w-]+\.[\w.-]+$/.test(s)) return `mailto:${s}`;
+    if (/^[\w-]+(\.[\w-]+)+([/?#].*)?$/.test(s)) return `https://${s}`;
+    return null;
+  }
+
+  function openLinkPopover(anchor, req = null) {
+    const st = safeState() || {};
+    let href = req?.href || st.href || '';
+    const sel = document.getSelection();
+    const a = sel?.anchorNode && (sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement)?.closest?.('a[href]');
+    if (!href && a && ed?.el.contains(a)) href = a.getAttribute('href') || '';
+    const apply = (url) => {
+      if (req?.apply) { req.apply(url); paintTools(safeState()); } else exec('setLink', url);
+    };
+    E.openPopover(anchor, html`
+      <form class="nb-linkpop" novalidate>
+        <div class="nb-pop__head">${st.link ? 'Sửa liên kết' : 'Chèn liên kết'}</div>
+        <input class="input input--sm" type="url" inputmode="url" value="${href}" placeholder="https://… hoặc email" aria-label="Địa chỉ liên kết" autocomplete="off" spellcheck="false" />
+        <p class="nb-linkpop__err" role="alert" hidden>Chỉ hỗ trợ liên kết http(s) hoặc email.</p>
+        <div class="nb-linkpop__acts">
+          ${st.link || href ? html`<button type="button" class="btn btn--sm btn--danger-ghost" data-unlink>Bỏ liên kết</button>` : ''}
+          <span class="grow"></span>
+          <button type="submit" class="btn btn--sm btn--primary">Áp dụng</button>
+        </div>
+      </form>`, {
+      label: 'Liên kết',
+      onOpen: (el, close) => {
+        const inp = el.querySelector('input');
+        el.querySelector('[data-unlink]')?.addEventListener('click', () => { close(); apply(null); });
+        el.querySelector('form').addEventListener('submit', (e) => {
+          e.preventDefault();
+          const url = normalizeUrl(inp.value);
+          if (url === '') { close(); apply(null); return; }
+          if (!url) { el.querySelector('.nb-linkpop__err').hidden = false; inp.focus(); return; }
+          close();
+          apply(url);
+        });
+        inp.focus();
+        inp.select();
+      },
+    });
+  }
+
+  /* ---------- images & recordings ---------- */
+  const onRequestImage = () => insertImage();
+  const onRequestRecord = () => startRecording();
+  const onRender = () => { if (ed) hydrate(ed.el); };
+  // Ctrl+K inside the editor: our popover instead of window.prompt.
+  const onRequestLink = (e) => {
+    e.preventDefault();
+    const anchor = $('[data-tool="link"]');
+    openLinkPopover(anchor && anchor.getClientRects().length ? anchor : ed.el, e.detail);
+  };
+
+  async function insertImage() {
+    if (!cur || cur.trashed_at) return;
+    const note = cur;
+    const range = lastRange;
+    const ta = $('.nb-text');
+    const at = ta ? [ta.selectionStart, ta.selectionEnd, ta.value] : null;
+    let files = [];
+    try {
+      files = IMG.pickImageFiles ? await IMG.pickImageFiles({ multiple: true }) : [await IMG.pickImageFile()].filter(Boolean);
+    } catch (err) { mediaError(err); }
+    if (!files?.length || cur !== note) return;
+    if (bodyMode() === 'edit' && ed) {
+      if (range && ed.el.contains(range.startContainer)) lastRange = range;
+      restoreSel();
+      if (imgUi?.insert) imgUi.insert(files);
+      else IMG.insertImages?.(ed, files, { uploadImage: uploadImageFor(note.id), onError: (err) => mediaError(err) });
+      return;
+    }
+    // Markdown mode: upload, then insert the references on their own lines at the caret.
+    toast('Đang tải ảnh lên…');
+    const lines = [];
+    for (const file of files) {
+      try {
+        const { url } = await uploadImageFor(note.id)(file);
+        const alt = String(file.name || '').replace(/\.[^.]+$/, '').replace(/[[\]\\]/g, '').slice(0, 120);
+        lines.push(`![${alt}](${url})`);
+      } catch (err) { mediaError(err); }
+    }
+    if (lines.length && cur === note && bodyMode() === 'source') insertSourceBlock(lines.join('\n\n'), at);
+  }
+
+  /**
+   * `at` = [start, end, value] captured before an await → those offsets while the text is
+   * unchanged; once the user typed meanwhile, the current caret (collapsed, so nothing
+   * typed is replaced) or the end of the text when the textarea lost focus.
+   */
+  function sourceRange(ta, at) {
+    if (!at) return [ta.selectionStart, ta.selectionEnd];
+    if (at.length < 3 || ta.value === at[2]) return [at[0], at[1]];
+    const p = document.activeElement === ta ? ta.selectionEnd : ta.value.length;
+    return [p, p];
+  }
+
+  /** Markdown mode: insert a block at the caret (or `at` [start, end, value]) with blank lines around it. */
+  function insertSourceBlock(md, at) {
+    const ta = $('.nb-text');
+    if (!ta) return;
+    const v = ta.value;
+    const [s, e] = sourceRange(ta, at);
+    const before = v.slice(0, s);
+    const pre = !before.trim() ? '' : before.endsWith('\n\n') ? '' : before.endsWith('\n') ? '\n' : '\n\n';
+    const after = v.slice(e);
+    const post = after.startsWith('\n\n') ? '' : after.startsWith('\n') ? '\n' : '\n\n';
+    const text = pre + md.trim() + post;
+    E.replaceRange(ta, s, e, text, s + text.length);
+  }
+
+  const appendBlock = (content, md) => {
+    const base = String(content || '').replace(/\s+$/, '');
+    return `${base ? `${base}\n\n` : ''}${md.trim()}\n`;
+  };
+
+  function startRecording() {
+    if (!cur || cur.trashed_at) return;
+    if (typeof REC.openRecorder !== 'function') return;
+    const note = cur;
+    try { recorder?.close?.(); } catch { /* already closed */ }
+    try {
+      recorder = REC.openRecorder({
+        noteId: note.id,
+        uploadAudio: uploadAudioFor(note.id),
+        onInsert: (md) => insertRecording(note, md),
+        onError: (err) => console.warn('[recorder]', err), // the dialog shows every error itself
+      });
+    } catch (err) { mediaError(err); }
+  }
+
+  async function insertRecording(note, md) {
+    if (!md) return;
+    if (cur === note && !note.trashed_at) {
+      const m = bodyMode();
+      if (m === 'edit' && ed) {
+        restoreSel();
+        try { ed.insertMarkdown(md); } catch (err) { console.error(err); }
+        syncEditor();
+        hydrate(ed.el);
+        renderFoot();
+      } else if (m === 'source') {
+        insertSourceBlock(md);
+      } else {
+        queue({ content: appendBlock(cur.content, md) }, { now: true });
+        mountPreview();
+        renderFoot();
+      }
+      return flush();
+    }
+    // The note is no longer open: append the recording to what is saved.
+    try {
+      const fresh = await N.getNote(note.id);
+      if (!fresh) return;
+      const content = appendBlock(fresh.content, md);
+      const saved = await N.updateNote(note.id, { content });
+      Object.assign(note, { content, updated_at: saved.updated_at });
+      updateItem(note);
+      toast(`Đã thêm bản ghi âm vào “${E.displayTitle(note)}”.`);
+    } catch (err) { toast.error(err); }
+  }
+
+  /* ---------- Markdown (source) mode tools ---------- */
+  function caseText(s, kind) {
+    const lower = s.toLocaleLowerCase('vi');
+    if (kind === 'upper') return s.toLocaleUpperCase('vi');
+    if (kind === 'lower') return lower;
+    if (kind === 'title') return lower.replace(/(^|[\s([{“"'\-/])(\p{L})/gu, (_, p, c) => p + c.toLocaleUpperCase('vi'));
+    return lower.replace(/(^\s*|[.!?…]\s+|\n\s*(?:[-*+>]\s+|\d+[.)]\s+|#{1,6}\s+|\[[ xX]\]\s+)*)(\p{L})/gu, (_, p, c) => p + c.toLocaleUpperCase('vi'));
+  }
+  function sourceCase(ta, kind) {
+    const { selectionStart: s, selectionEnd: e } = ta;
+    let a = s, b = e;
+    if (a === b) { // no selection: the word at the caret
+      const v = ta.value;
+      while (a > 0 && /[\p{L}\p{N}]/u.test(v[a - 1])) a--;
+      while (b < v.length && /[\p{L}\p{N}]/u.test(v[b])) b++;
+    }
+    const text = caseText(ta.value.slice(a, b), kind);
+    E.replaceRange(ta, a, b, text, s === e ? s : a, s === e ? s : a + text.length);
+  }
+  function sourceClear(ta) {
+    const { selectionStart: s, selectionEnd: e } = ta;
+    const { text } = E.currentLine(ta);
+    if (s === e) {
+      const ls = ta.value.lastIndexOf('\n', s - 1) + 1;
+      const plain = text.replace(/^\s*(#{1,6}\s+|>\s?|[-*+]\s+\[[ xX]\]\s+|[-*+]\s+|\d{1,9}[.)]\s+)/, '').replace(/(\*\*|__|~~|==|\+\+|`)/g, '');
+      E.replaceRange(ta, ls, ls + text.length, plain, ls + plain.length);
+      return;
+    }
+    const sel = ta.value.slice(s, e).replace(/(\*\*|__|~~|==|\+\+|`)/g, '').replace(/(^|\s)[*_](\S[^*_]*?)[*_](?=\s|$)/g, '$1$2');
+    E.replaceRange(ta, s, e, sel, s, s + sel.length);
+  }
+  const TABLE_MD = '| Cột 1 | Cột 2 | Cột 3 |\n|---|---|---|\n|  |  |  |\n|  |  |  |';
+
+  function sourceTool(id, el) {
+    const ta = $('.nb-text');
+    if (!ta) return;
+    switch (id) {
+      case 'bold': return E.wrapSelection(ta, '**');
+      case 'italic': return E.wrapSelection(ta, '_');
+      case 'underline': return E.wrapSelection(ta, '++');
+      case 'strike': return E.wrapSelection(ta, '~~');
+      case 'mark': return E.wrapSelection(ta, '==');
+      case 'code': return ta.value.slice(ta.selectionStart, ta.selectionEnd).includes('\n') ? E.insertBlock(ta, 'code') : E.wrapSelection(ta, '`', '`', 'mã');
+      case 'link': return E.insertLink(ta);
+      case 'hr': return E.insertBlock(ta, 'hr');
+      case 'table': return insertSourceBlock(TABLE_MD);
+      case 'h1': case 'h2': case 'h3': case 'ul': case 'ol': case 'task': case 'quote': return E.toggleLines(ta, id);
+      case 'clear': return sourceClear(ta);
+      case 'case': return openCaseMenu(el, (c) => { ta.focus(); sourceCase(ta, c); });
+      case 'undo': case 'redo':
+        ta.focus();
+        try { document.execCommand(id); } catch { /* not supported */ }
+        return;
+      case 'image': return insertImage();
+      case 'record': return startRecording();
+    }
+  }
+
+  /* ---------- find & replace ---------- */
+  const hasHighlights = () => typeof CSS !== 'undefined' && CSS.highlights && typeof Highlight === 'function';
+  function clearHighlights() {
+    if (!hasHighlights()) return;
+    CSS.highlights.delete('nb-find');
+    CSS.highlights.delete('nb-find-cur');
+  }
+
+  function findTpl() {
+    return html`
+      <div class="nb-find__row">
+        <label class="nb-find__field">${icon('search')}<span class="sr-only">Tìm</span>
+          <input type="text" data-find-q placeholder="Tìm trong ghi chú" autocomplete="off" spellcheck="false" />
+          <span class="nb-find__count" data-find-count aria-live="polite"></span>
+        </label>
+        <button type="button" class="nb-find__btn nb-find__case" data-find-act="case" aria-pressed="false" title="Phân biệt hoa / thường" aria-label="Phân biệt hoa thường">Aa</button>
+        <button type="button" class="nb-find__btn nb-find__up" data-find-act="prev" title="Kết quả trước (Shift+Enter)" aria-label="Kết quả trước">${icon('chevronDown')}</button>
+        <button type="button" class="nb-find__btn" data-find-act="next" title="Kết quả sau (Enter)" aria-label="Kết quả sau">${icon('chevronDown')}</button>
+        <button type="button" class="nb-find__btn nb-find__more" data-find-act="toggle" aria-expanded="false" title="Thay thế (Ctrl+H)" aria-label="Hiện ô thay thế">${icon('repeat')}</button>
+        <button type="button" class="nb-find__btn" data-find-act="close" title="Đóng (Esc)" aria-label="Đóng tìm kiếm">${icon('x')}</button>
+      </div>
+      <div class="nb-find__row nb-find__rep" data-find-rep hidden>
+        <label class="nb-find__field"><span class="sr-only">Thay bằng</span>
+          <input type="text" data-find-r placeholder="Thay bằng…" autocomplete="off" spellcheck="false" />
+        </label>
+        <button type="button" class="btn btn--sm" data-find-act="replace">Thay</button>
+        <button type="button" class="btn btn--sm" data-find-act="replace-all">Thay tất cả</button>
+      </div>`;
+  }
+
+  function selectedText() {
+    if (bodyMode() === 'source') {
+      const ta = $('.nb-text');
+      return ta && document.activeElement === ta ? ta.value.slice(ta.selectionStart, ta.selectionEnd) : '';
+    }
+    const sel = document.getSelection();
+    return ed && sel?.rangeCount && ed.el.contains(sel.anchorNode) ? sel.toString() : '';
+  }
+
+  function openFind({ replace = false } = {}) {
+    if (!cur || cur.trashed_at) return;
+    if (bodyMode() === 'preview') setMode(editMode);
+    const bar = $('[data-find]');
+    if (!bar) return;
+    const pre = selectedText();
+    if (!findUi) {
+      mount(bar, findTpl());
+      findUi = { matches: [], idx: -1, cs: false, replace: false };
+    }
+    findUi.replace = replace || findUi.replace;
+    bar.hidden = false;
+    bar.querySelector('[data-find-rep]').hidden = !findUi.replace;
+    bar.querySelector('[data-find-act="toggle"]').setAttribute('aria-expanded', String(findUi.replace));
+    const q = bar.querySelector('[data-find-q]');
+    if (pre && !pre.includes('\n') && pre.length <= 120) q.value = pre;
+    runFind();
+    (replace && q.value ? bar.querySelector('[data-find-r]') : q).focus();
+    q.select?.();
+  }
+
+  function closeFind({ restore = true } = {}) {
+    clearHighlights();
+    const bar = $('[data-find]');
+    const was = Boolean(findUi);
+    findUi = null;
+    if (bar) { bar.hidden = true; mount(bar, ''); }
+    if (restore && was) {
+      if (bodyMode() === 'edit') restoreSel();
+      else if (bodyMode() === 'source') $('.nb-text')?.focus();
+    }
+  }
+
+  /** Recompute matches for the current surface; keeps the current index when possible. */
+  function runFind({ keep = false } = {}) {
+    if (!findUi) return;
+    const bar = $('[data-find]');
+    const q = bar?.querySelector('[data-find-q]')?.value || '';
+    const m = bodyMode();
+    let matches = [];
+    if (q) {
+      if (m === 'edit' && ed) {
+        try { matches = ed.exec('findAll', q, { caseSensitive: findUi.cs }) || []; } catch { matches = []; }
+      } else if (m === 'source') {
+        const ta = $('.nb-text');
+        const hay = findUi.cs ? ta.value : ta.value.toLocaleLowerCase('vi');
+        const needle = findUi.cs ? q : q.toLocaleLowerCase('vi');
+        for (let i = hay.indexOf(needle); i >= 0 && matches.length < 5000; i = hay.indexOf(needle, i + needle.length)) {
+          matches.push({ start: i, end: i + q.length });
+        }
+      }
+    }
+    findUi.matches = matches;
+    if (!matches.length) findUi.idx = -1;
+    else if (keep && findUi.idx >= 0) findUi.idx = Math.min(findUi.idx, matches.length - 1);
+    else findUi.idx = 0;
+    paintFind();
+  }
+  const refindSoon = debounce(() => runFind({ keep: true }), 200);
+
+  function paintFind({ reveal = false } = {}) {
+    if (!findUi) return;
+    const bar = $('[data-find]');
+    const { matches, idx } = findUi;
+    const q = bar?.querySelector('[data-find-q]')?.value || '';
+    const count = bar?.querySelector('[data-find-count]');
+    if (count) count.textContent = !q ? '' : matches.length ? `${num(idx + 1)}/${num(matches.length)}` : 'Không thấy';
+    bar?.classList.toggle('is-miss', Boolean(q) && !matches.length);
+    bar?.querySelectorAll('[data-find-act="prev"],[data-find-act="next"],[data-find-act="replace"],[data-find-act="replace-all"]').forEach((b) => { b.disabled = !matches.length; });
+    clearHighlights();
+    if (!matches.length) return;
+    const curM = matches[idx];
+    if (bodyMode() === 'edit') {
+      if (hasHighlights()) {
+        CSS.highlights.set('nb-find', new Highlight(...matches.filter((r) => r !== curM)));
+        CSS.highlights.set('nb-find-cur', new Highlight(curM));
+      }
+      if (reveal) {
+        const el = curM.startContainer.nodeType === 1 ? curM.startContainer : curM.startContainer.parentElement;
+        el?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+      }
+    } else if (bodyMode() === 'source' && reveal) {
+      const ta = $('.nb-text');
+      ta.setSelectionRange(curM.start, curM.end);
+      const lh = parseFloat(getComputedStyle(ta).lineHeight) || 28;
+      const line = ta.value.slice(0, curM.start).split('\n').length - 1;
+      const y = ta.getBoundingClientRect().top + line * lh;
+      const sc = $('[data-scroll]');
+      const scrolls = sc && sc.scrollHeight > sc.clientHeight && getComputedStyle(sc).overflowY !== 'visible';
+      const view = scrolls ? sc.getBoundingClientRect() : { top: 0, height: window.innerHeight };
+      const delta = y - (view.top + view.height / 2);
+      if (Math.abs(delta) > view.height / 3) (scrolls ? sc : window).scrollBy({ top: delta, behavior: 'smooth' });
+    }
+  }
+
+  function gotoMatch(dir) {
+    if (!findUi?.matches.length) return;
+    const n = findUi.matches.length;
+    findUi.idx = (findUi.idx + dir + n) % n;
+    paintFind({ reveal: true });
+  }
+
+  function replaceOne() {
+    if (!findUi?.matches.length) return;
+    const bar = $('[data-find]');
+    const repl = bar.querySelector('[data-find-r]').value;
+    const curM = findUi.matches[findUi.idx];
+    if (bodyMode() === 'source') {
+      E.replaceRange($('.nb-text'), curM.start, curM.end, repl);
+    } else if (ed) {
+      try { ed.exec('replaceRange', curM, repl); } catch (err) { console.error(err); }
+      syncEditor();
+    }
+    runFind({ keep: true });
+    paintFind({ reveal: true });
+    bar.querySelector('[data-find-r]').focus();
+  }
+
+  function replaceEvery() {
+    if (!findUi?.matches.length) return;
+    const bar = $('[data-find]');
+    const q = bar.querySelector('[data-find-q]').value;
+    const repl = bar.querySelector('[data-find-r]').value;
+    let count = 0;
+    if (bodyMode() === 'source') {
+      const ta = $('.nb-text');
+      const parts = [];
+      let last = 0;
+      for (const mm of findUi.matches) { parts.push(ta.value.slice(last, mm.start), repl); last = mm.end; count++; }
+      parts.push(ta.value.slice(last));
+      E.replaceRange(ta, 0, ta.value.length, parts.join(''), 0);
+    } else if (ed) {
+      try { count = Number(ed.exec('replaceAll', q, repl, { caseSensitive: findUi.cs })) || 0; } catch (err) { console.error(err); count = 0; }
+      syncEditor();
+    }
+    runFind();
+    toast(count ? `Đã thay ${num(count)} chỗ.` : 'Không có gì để thay.');
+  }
+
+  disposers.push(on(root, 'click', '[data-find-act]', (e, el) => {
+    switch (el.dataset.findAct) {
+      case 'next': return gotoMatch(1);
+      case 'prev': return gotoMatch(-1);
+      case 'close': return closeFind();
+      case 'replace': return replaceOne();
+      case 'replace-all': return replaceEvery();
+      case 'case':
+        findUi.cs = !findUi.cs;
+        el.setAttribute('aria-pressed', String(findUi.cs));
+        return runFind();
+      case 'toggle': {
+        findUi.replace = !findUi.replace;
+        el.setAttribute('aria-expanded', String(findUi.replace));
+        const rep = $('[data-find-rep]');
+        rep.hidden = !findUi.replace;
+        if (findUi.replace) rep.querySelector('input').focus();
+      }
+    }
+  }));
+  disposers.push(on(root, 'input', '[data-find-q]', () => runFind()));
+  disposers.push(on(root, 'keydown', '[data-find]', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeFind(); return; }
+    if (e.key !== 'Enter' || e.isComposing) return;
+    e.preventDefault();
+    if (e.target.matches('[data-find-r]')) {
+      if (e.ctrlKey || e.metaKey) replaceEvery(); else replaceOne();
+    } else gotoMatch(e.shiftKey ? -1 : 1);
+  }));
 
   function bindTags() {
     const meta = $('[data-meta]');
@@ -619,24 +1599,7 @@ export default async function notesPage(root, { query, signal }) {
       </span>`);
   }
 
-  const refreshPreview = debounce(() => {
-    const pv = $('[data-preview]');
-    if (pv && cur && (ws.querySelector('[data-body]')?.dataset.mode || 'edit') !== 'edit') mount(pv, renderPreview());
-  }, 140);
   const refreshFoot = debounce(renderFoot, 300);
-
-  function setMode(m) {
-    if (!MODES.includes(m) || !cur || cur.trashed_at) return;
-    mode = m;
-    store.set(LS_MODE, m);
-    $('[data-editor]').dataset.mode = m;
-    const body = $('[data-body]');
-    if (body) body.dataset.mode = m;
-    root.querySelectorAll('[data-mode]').forEach((b) => b.tagName === 'BUTTON' && b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
-    if (m !== 'edit') mount($('[data-preview]'), renderPreview());
-    else autosize($('.nb-text'));
-    if (m === 'split') autosize($('.nb-text'));
-  }
 
   /* ================================================================
      Open / create / close
@@ -655,6 +1618,7 @@ export default async function notesPage(root, { query, signal }) {
     }
     cur = n;
     pending = {};
+    savedRefs = mediaRefs(n.content);
     setQuery({ id: n.id });
     markActive();
     showPane('editor'); // first, so the textareas have a layout to size / focus
@@ -676,6 +1640,7 @@ export default async function notesPage(root, { query, signal }) {
     const i = rows.findIndex((x) => x.id === id);
     notes = notes.filter((x) => x.id !== id);
     if (cur?.id === id) {
+      clearTimeout(saveTimer);
       pending = {};
       cur = null;
       const next = !isPhone() ? (rows[i + 1] || rows[i - 1]) : null;
@@ -726,6 +1691,7 @@ export default async function notesPage(root, { query, signal }) {
     }
     cur = byId(n.id) || n;
     pending = {};
+    savedRefs = mediaRefs(cur.content);
     setQuery({ id: n.id });
     markActive();
     showPane('editor');
@@ -847,17 +1813,24 @@ export default async function notesPage(root, { query, signal }) {
       b.title = cur.pinned ? 'Bỏ ghim' : 'Ghim lên đầu';
     }
     toast(cur.pinned ? 'Đã ghim ghi chú.' : 'Đã bỏ ghim.');
-    if (f.view === 'pinned' && !cur.pinned) { const id = cur.id; flush().then(() => dropFromList(id)); }
-    else renderList();
+    if (f.view === 'pinned' && !cur.pinned) {
+      const id = cur.id;
+      settleBeforeDrop(id).then((ok) => (ok ? dropFromList(id) : renderList()));
+    } else renderList();
+  }
+
+  /** Edits typed while a trash / archive request was in flight: save them before the note leaves. */
+  async function saveTyped(id) {
+    if (cur?.id === id && Object.keys(pending).length) await flush();
   }
 
   async function setArchived(n, archived) {
-    await flush();
+    const leaves = (f.view === 'archived') !== archived;
+    if (leaves) { if (!(await settleBeforeDrop(n.id))) return; } else await flush();
     try {
       const saved = await N.updateNote(n.id, { archived });
       Object.assign(n, saved);
-      const leaves = (f.view === 'archived') !== archived;
-      if (leaves) dropFromList(n.id); else { renderList(); if (cur?.id === n.id) renderEditor(); }
+      if (leaves) { await saveTyped(n.id); dropFromList(n.id); } else { renderList(); if (cur?.id === n.id) renderEditor(); }
       loadOverview();
       toast(archived ? 'Đã lưu trữ ghi chú.' : 'Đã đưa ghi chú trở lại.', {
         action: { label: 'Hoàn tác', onClick: () => setArchived(n, !archived).then(() => { if (!byId(n.id)) loadList(); }) },
@@ -866,10 +1839,11 @@ export default async function notesPage(root, { query, signal }) {
   }
 
   async function trash(n) {
-    await flush();
+    if (!(await settleBeforeDrop(n.id))) return;
     try {
       await N.trashNote(n.id);
       if (freshId === n.id) freshId = null;
+      await saveTyped(n.id);
       dropFromList(n.id);
       loadOverview();
       toast('Đã chuyển vào Thùng rác.', {
@@ -892,6 +1866,7 @@ export default async function notesPage(root, { query, signal }) {
     if (!ok) return;
     try {
       await N.deleteNote(n.id);
+      dropMedia(n.id); // best effort: the note's Storage folder
       dropFromList(n.id);
       loadOverview();
       toast('Đã xóa vĩnh viễn.');
@@ -902,7 +1877,10 @@ export default async function notesPage(root, { query, signal }) {
     const ok = await confirmDialog({ title: 'Dọn sạch Thùng rác?', message: `${num(notes.length)} ghi chú sẽ bị xóa vĩnh viễn. Không thể hoàn tác.`, confirmLabel: 'Dọn sạch' });
     if (!ok) return;
     try {
-      const count = await N.emptyTrash();
+      const ids = await N.emptyTrashIds();
+      const count = ids.length;
+      for (const id of ids) pruneIds.delete(id);
+      Promise.resolve().then(() => M.deleteMediaForNotes?.(ids)).then(() => M.purgeOrphanMedia?.()).catch(() => {});
       cur = null;
       setQuery({ id: null });
       renderEditor();
@@ -920,6 +1898,14 @@ export default async function notesPage(root, { query, signal }) {
         title: (n.title ? `${n.title} (bản sao)` : '').slice(0, 200),
         content: n.content, notebook: n.notebook, tags: n.tags, color: n.color, kind: n.kind, task_id: n.task_id,
       });
+      // The copy gets its own media files, so deleting the original never breaks it.
+      if (mediaRefs(copy.content).size) {
+        try {
+          // copyMediaInto keeps every copy that succeeded (and schedules a prune of the copy's folder).
+          const content = await copyMediaInto(copy.id, copy.content);
+          if (content !== copy.content) Object.assign(copy, await N.updateNote(copy.id, { content }));
+        } catch { /* best effort: links whose copy failed keep pointing at the original's files */ }
+      }
       if (viewAccepts(copy)) { notes.unshift(copy); renderList(); }
       loadOverview();
       openNote(copy.id, { focus: 'title' });
@@ -930,6 +1916,7 @@ export default async function notesPage(root, { query, signal }) {
   const markdownOf = (n) => `${n.title ? `# ${n.title}\n\n` : ''}${n.content}`;
 
   async function copyMarkdown(n) {
+    syncEditor();
     try {
       await navigator.clipboard.writeText(markdownOf(n));
       toast('Đã sao chép Markdown.');
@@ -939,6 +1926,7 @@ export default async function notesPage(root, { query, signal }) {
   }
 
   function exportMarkdown(n) {
+    syncEditor();
     const name = (E.displayTitle(n).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D')
       .replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-').toLowerCase() || 'ghi-chu').slice(0, 60);
     const url = URL.createObjectURL(new Blob([markdownOf(n)], { type: 'text/markdown;charset=utf-8' }));
@@ -998,9 +1986,12 @@ export default async function notesPage(root, { query, signal }) {
 
   function taskFromLine() {
     if (!cur) return;
-    const ta = $('.nb-text');
     let title = '';
-    if (ta && mode !== 'preview') title = E.lineToTaskTitle(E.currentLine(ta).text);
+    const m = bodyMode();
+    if (m === 'source') {
+      const ta = $('.nb-text');
+      if (ta) title = E.lineToTaskTitle(E.currentLine(ta).text);
+    } else if (m === 'edit') title = E.lineToTaskTitle(currentBlockText());
     const note = cur;
     openTaskForm({
       defaults: { title: title || E.displayTitle(note).slice(0, 200), tags: (note.tags || []).slice(0, 20), description: `Từ ghi chú: ${E.displayTitle(note)}` },
@@ -1011,8 +2002,23 @@ export default async function notesPage(root, { query, signal }) {
     });
   }
 
+  /** Text of the editor block holding the caret (a list item without its nested lists). */
+  function currentBlockText() {
+    if (!ed) return '';
+    const sel = document.getSelection();
+    let node = sel?.rangeCount && ed.el.contains(sel.anchorNode) ? sel.anchorNode : lastRange?.startContainer;
+    if (!node || !ed.el.contains(node)) return '';
+    if (node.nodeType !== 1) node = node.parentElement;
+    const block = node?.closest('li, p, h1, h2, h3, td, th, pre, blockquote');
+    if (!block || !ed.el.contains(block)) return '';
+    const c = block.cloneNode(true);
+    c.querySelectorAll('ul, ol, [contenteditable="false"]').forEach((x) => x.remove());
+    return c.textContent.replace(/ /g, ' ').trim();
+  }
+
   async function tasksFromChecklist() {
     if (!cur) return;
+    syncEditor();
     const items = E.openChecklistItems(cur.content);
     if (!items.length) { toast.info('Không có mục checklist nào chưa hoàn thành.'); return; }
     const ok = await confirmDialog({
@@ -1051,7 +2057,16 @@ export default async function notesPage(root, { query, signal }) {
       ]);
       return;
     }
+    // Phones hide the colour button and the edit / Markdown / preview switch: offer them here.
+    const phoneOnly = isPhone() ? [
+      { label: 'Nhãn màu…', icon: 'sparkle', onClick: () => openColorPicker(anchor) },
+      bodyMode() === 'source'
+        ? { label: 'Soạn thảo trực quan', icon: 'edit', onClick: () => setMode('edit') }
+        : { label: 'Sửa mã Markdown', icon: 'note', onClick: () => setMode('source') },
+      'sep',
+    ] : [];
     popMenu(anchor, [
+      ...phoneOnly,
       { label: n.pinned ? 'Bỏ ghim' : 'Ghim lên đầu', icon: 'pin', onClick: togglePin },
       { label: n.task_id ? 'Đổi công việc liên kết…' : 'Liên kết công việc…', icon: 'link', onClick: openLinkTask },
       { label: 'Tạo công việc từ dòng này', icon: 'tasks', onClick: taskFromLine },
@@ -1064,6 +2079,53 @@ export default async function notesPage(root, { query, signal }) {
       { label: n.archived ? 'Bỏ lưu trữ' : 'Lưu trữ', icon: 'archive', onClick: () => setArchived(n, !n.archived) },
       { label: 'Chuyển vào Thùng rác', icon: 'trash', danger: true, onClick: () => trash(n) },
     ]);
+  }
+
+  /* ---------- list-row actions (swipe / long-press) ---------- */
+  async function pinListed(n) {
+    if (cur?.id === n.id) return togglePin();
+    try {
+      Object.assign(n, await N.updateNote(n.id, { pinned: !n.pinned }));
+      toast(n.pinned ? 'Đã ghim ghi chú.' : 'Đã bỏ ghim.');
+      if (f.view === 'pinned' && !n.pinned) dropFromList(n.id); else renderList();
+      loadOverview();
+    } catch (err) { toast.error(err); }
+  }
+
+  function rowActions(id) {
+    const n = byId(id);
+    if (!n) return null;
+    if (n.trashed_at) {
+      return { right: { label: 'Khôi phục', icon: icon('undo'), tone: 'ok', leaves: true, run: () => restore(n) } };
+    }
+    return {
+      right: { label: n.pinned ? 'Bỏ ghim' : 'Ghim', icon: icon('pin'), tone: 'accent', leaves: f.view === 'pinned' && n.pinned, run: () => pinListed(n) },
+      left: n.archived
+        ? { label: 'Bỏ lưu trữ', icon: icon('archive'), tone: 'info', leaves: true, run: () => setArchived(n, false) }
+        : { label: 'Thùng rác', icon: icon('trash'), tone: 'danger', leaves: true, run: () => trash(n) },
+    };
+  }
+
+  function rowMenu(id, anchor) {
+    const n = byId(id);
+    if (!n) return;
+    if (n.trashed_at) {
+      popMenu(anchor, [
+        { label: 'Khôi phục', icon: 'undo', onClick: () => restore(n) },
+        'sep',
+        { label: 'Xóa vĩnh viễn', icon: 'trash', danger: true, onClick: () => destroy(n) },
+      ], { align: 'center' });
+      return;
+    }
+    popMenu(anchor, [
+      { label: 'Mở', icon: 'edit', onClick: () => openNote(n.id) },
+      { label: n.pinned ? 'Bỏ ghim' : 'Ghim lên đầu', icon: 'pin', onClick: () => pinListed(n) },
+      { label: 'Nhân bản', icon: 'copy', onClick: () => duplicate(n) },
+      { label: 'Sao chép Markdown', icon: 'note', onClick: () => copyMarkdown(n) },
+      'sep',
+      { label: n.archived ? 'Bỏ lưu trữ' : 'Lưu trữ', icon: 'archive', onClick: () => setArchived(n, !n.archived) },
+      { label: 'Chuyển vào Thùng rác', icon: 'trash', danger: true, onClick: () => trash(n) },
+    ], { align: 'center' });
   }
 
   /* ---------- notebooks ---------- */
@@ -1188,6 +2250,7 @@ export default async function notesPage(root, { query, signal }) {
       case 'color': return openColorPicker(el);
       case 'pin': return togglePin();
       case 'more': return openMore(el);
+      case 'mode-toggle': return setMode(mode === 'preview' ? editMode : 'preview');
       case 'archive': return setArchived(cur, !cur.archived);
       case 'restore': return restore(cur);
       case 'destroy': return destroy(cur);
@@ -1204,33 +2267,39 @@ export default async function notesPage(root, { query, signal }) {
   }));
 
   disposers.push(on(root, 'click', '.nb-item[data-id]', (e, el) => openNote(el.dataset.id)));
+  // Phones: swipe a row right to pin (restore in the trash), left to trash; long-press for more.
+  disposers.push(bindRowGestures($('[data-items]'), {
+    enabled: () => isPhone() && f.layout === 'list',
+    actions: rowActions,
+    onMenu: rowMenu,
+  }));
+  disposers.push(trackKeyboard(ws));
   disposers.push(on(root, 'click', '[data-view]', (e, el) => setScope({ view: el.dataset.view })));
   disposers.push(on(root, 'click', '[data-nb]', (e, el) => setScope({ view: 'nb', nb: el.dataset.nb })));
   disposers.push(on(root, 'click', '[data-tagf]', (e, el) => (f.view === 'tag' && f.tag === el.dataset.tagf ? setScope({ view: 'all' }) : setScope({ view: 'tag', tag: el.dataset.tagf }))));
   disposers.push(on(root, 'click', '[data-mode]', (e, el) => el.tagName === 'BUTTON' && setMode(el.dataset.mode)));
 
-  disposers.push(on(root, 'click', '[data-tool]', (e, el) => {
-    const ta = $('.nb-text');
-    if (!ta) return;
-    if (mode === 'preview') setMode('edit');
-    applyTool(el.dataset.tool, ta);
-  }));
-  // Keep the caret in the textarea when tapping toolbar buttons.
+  disposers.push(on(root, 'click', '[data-tool]', (e, el) => { if (!el.disabled) runTool(el.dataset.tool, el); }));
+  // Keep the caret / selection in the editor when pressing toolbar buttons.
   disposers.push(on(root, 'mousedown', '[data-tool]', (e) => e.preventDefault()));
-
-  function applyTool(id, ta) {
-    switch (id) {
-      case 'bold': return E.wrapSelection(ta, '**');
-      case 'italic': return E.wrapSelection(ta, '_');
-      case 'strike': return E.wrapSelection(ta, '~~');
-      case 'mark': return E.wrapSelection(ta, '==');
-      case 'code': return ta.value.slice(ta.selectionStart, ta.selectionEnd).includes('\n') ? E.insertBlock(ta, 'code') : E.wrapSelection(ta, '`', '`', 'mã');
-      case 'link': return E.insertLink(ta);
-      case 'hr': return E.insertBlock(ta, 'hr');
-      case 'h1': case 'h2': case 'h3': case 'ul': case 'ol': case 'task': case 'quote': return E.toggleLines(ta, id);
-      case 'line-task': return taskFromLine();
-    }
-  }
+  // Toolbar: one tab stop, arrow keys move between buttons (WAI-ARIA toolbar pattern).
+  disposers.push(on(root, 'keydown', '[data-tools]', (e, bar) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    const btns = [...bar.querySelectorAll('[data-tool]:not([disabled]):not([hidden]):not([data-overflow])')].filter((b) => b.getClientRects().length);
+    if (!btns.length) return;
+    const i = btns.indexOf(document.activeElement);
+    const j = e.key === 'Home' ? 0 : e.key === 'End' ? btns.length - 1
+      : (Math.max(i, 0) + (e.key === 'ArrowRight' ? 1 : -1) + btns.length) % btns.length;
+    e.preventDefault();
+    btns[j].focus();
+  }));
+  disposers.push(on(root, 'focusin', '[data-tool]', (e, el) => {
+    el.closest('[data-tools]')?.querySelectorAll('[data-tool]').forEach((b) => { b.tabIndex = b === el ? 0 : -1; });
+  }));
+  // Preview: click an image to see it full size.
+  disposers.push(on(root, 'click', '[data-preview] img', (e, img) => {
+    if (img.currentSrc || img.src) IMG.openLightbox?.(img.currentSrc || img.src, img.alt || '');
+  }));
 
   disposers.push(on(root, 'input', '[data-field]', (e, el) => {
     if (!cur || cur.trashed_at) return;
@@ -1243,9 +2312,23 @@ export default async function notesPage(root, { query, signal }) {
     } else if (k === 'content') {
       autosize(el);
       queue({ content: el.value });
-      refreshPreview();
       refreshFoot();
+      if (findUi) refindSoon();
     }
+  }));
+  // Markdown mode: pasting text with another note's nm-media: links copies those files first.
+  disposers.push(on(root, 'paste', '.nb-text', (e, ta) => {
+    const text = e.clipboardData?.getData('text/plain') || '';
+    if (!cur || cur.trashed_at || !/nm-media:/.test(text)) return;
+    e.preventDefault();
+    const note = cur;
+    const at = [ta.selectionStart, ta.selectionEnd, ta.value];
+    Promise.resolve(copyMediaInto(note.id, text)).then((out) => {
+      const t = $('.nb-text');
+      if (cur !== note || bodyMode() !== 'source' || !t) return;
+      const [s, end] = sourceRange(t, at); // the user may have typed during the copy
+      E.replaceRange(t, s, end, out);
+    });
   }));
   disposers.push(on(root, 'change', 'select[data-field="kind"]', (e, el) => {
     queue({ kind: el.value }, { now: true });
@@ -1265,8 +2348,9 @@ export default async function notesPage(root, { query, signal }) {
   disposers.push(on(root, 'keydown', '.nb-title', (e, el) => {
     if (e.key === 'Enter' && !e.isComposing) {
       e.preventDefault();
-      const ta = $('.nb-text');
-      if (ta && mode !== 'preview') { ta.focus(); ta.setSelectionRange(0, 0); }
+      const m = bodyMode();
+      if (m === 'edit' && ed) ed.focus();
+      else if (m === 'source') { const ta = $('.nb-text'); ta?.focus(); ta?.setSelectionRange(0, 0); }
     }
   }));
 
@@ -1275,16 +2359,17 @@ export default async function notesPage(root, { query, signal }) {
     const run = (fn) => { e.preventDefault(); fn(); };
     if (mod && !e.shiftKey && !e.altKey) {
       const k = e.key.toLowerCase();
-      if (k === 'b') return run(() => applyTool('bold', ta));
-      if (k === 'i') return run(() => applyTool('italic', ta));
-      if (k === 'k') return run(() => applyTool('link', ta));
-      if (k === 'e') return run(() => applyTool('code', ta));
+      if (k === 'b') return run(() => sourceTool('bold', ta));
+      if (k === 'u') return run(() => sourceTool('underline', ta));
+      if (k === 'i') return run(() => sourceTool('italic', ta));
+      if (k === 'k') return run(() => sourceTool('link', ta));
+      if (k === 'e') return run(() => sourceTool('code', ta));
     }
     if (mod && e.shiftKey && !e.altKey) {
       const map = { Digit8: 'ul', Digit7: 'ol', Digit9: 'task', Period: 'quote', KeyX: 'strike', KeyH: 'mark' };
-      if (map[e.code]) return run(() => applyTool(map[e.code], ta));
+      if (map[e.code]) return run(() => sourceTool(map[e.code], ta));
     }
-    if (mod && e.altKey && /^Digit[1-3]$/.test(e.code)) return run(() => applyTool(`h${e.code.slice(-1)}`, ta));
+    if (mod && e.altKey && /^Digit[1-3]$/.test(e.code)) return run(() => sourceTool(`h${e.code.slice(-1)}`, ta));
     if (e.key === 'Enter' && !mod && !e.shiftKey && !e.altKey && !e.isComposing) {
       if (E.continueList(ta)) e.preventDefault();
       return;
@@ -1324,8 +2409,14 @@ export default async function notesPage(root, { query, signal }) {
     if (mod && e.key === '/') {
       if (!cur || cur.trashed_at) return;
       e.preventDefault();
-      setMode(mode === 'preview' ? 'edit' : 'preview');
-      if (mode === 'edit') $('.nb-text')?.focus();
+      setMode(mode === 'preview' ? editMode : 'preview', { focus: true });
+      return;
+    }
+    // Find / replace inside the open note (Ctrl+F / Ctrl+H); elsewhere the browser keeps its own.
+    if (mod && !e.altKey && !e.shiftKey && ['f', 'h'].includes(e.key.toLowerCase())) {
+      if (!cur || cur.trashed_at || !e.target.closest?.('[data-editor]')) return;
+      e.preventDefault();
+      openFind({ replace: e.key.toLowerCase() === 'h' });
       return;
     }
     if (e.key === 'Escape' && ws.dataset.nav === 'open') { closeNav(); return; }
@@ -1337,6 +2428,7 @@ export default async function notesPage(root, { query, signal }) {
   disposers.push(() => document.removeEventListener('keydown', onKey));
 
   const onBeforeUnload = (e) => {
+    syncEditor(); // keystrokes still inside the editor's 300 ms onChange debounce
     if (!Object.keys(pending).length && !saving) return;
     flush();
     e.preventDefault();
@@ -1344,6 +2436,19 @@ export default async function notesPage(root, { query, signal }) {
   };
   window.addEventListener('beforeunload', onBeforeUnload);
   disposers.push(() => window.removeEventListener('beforeunload', onBeforeUnload));
+  // Mobile / PWA: timers freeze in the background and the OS may kill the page without a
+  // beforeunload → save as soon as the page is hidden.
+  const saveOnHide = (e) => {
+    if (e?.type !== 'pagehide' && document.visibilityState !== 'hidden') return;
+    syncEditor();
+    if (Object.keys(pending).length) flush();
+  };
+  document.addEventListener('visibilitychange', saveOnHide);
+  window.addEventListener('pagehide', saveOnHide);
+  disposers.push(() => {
+    document.removeEventListener('visibilitychange', saveOnHide);
+    window.removeEventListener('pagehide', saveOnHide);
+  });
 
   const onResize = debounce(fit, 120);
   window.addEventListener('resize', onResize);
@@ -1378,6 +2483,8 @@ export default async function notesPage(root, { query, signal }) {
   }
 
   return () => {
+    closeFind({ restore: false });
+    try { recorder?.close?.(); } catch { /* already closed */ }
     disposers.forEach((d) => d());
     tagObs?.disconnect();
     E.closePopover();
@@ -1387,7 +2494,14 @@ export default async function notesPage(root, { query, signal }) {
       clearTimeout(saveTimer);
       pending = {};
       const id = cur.id;
-      Promise.resolve(saving).then(() => N.deleteNote(id)).catch(() => {});
-    } else if (Object.keys(pending).length) flush();
+      Promise.resolve(saving).then(() => N.deleteNote(id)).then(() => dropMedia(id)).catch(() => {});
+    } else {
+      // Save what is left, then prune media the open note no longer references.
+      const id = cur?.id;
+      Promise.resolve(Object.keys(pending).length ? flush() : null)
+        .then(() => { if (id && pruneIds.has(id)) return runPrune(id); })
+        .then(() => (pruneIds.size ? runPrune() : null))
+        .catch(() => {});
+    }
   };
 }

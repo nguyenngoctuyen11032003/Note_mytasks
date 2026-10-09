@@ -8,6 +8,7 @@ import { esc, html, raw } from '../utils/dom.js';
 import { icon } from './icons.js';
 import { today, startOfWeek, endOfWeek } from '../utils/date.js';
 import { day } from '../utils/format.js';
+import { imageLine, audioLine, safeMediaSrc } from './rich/markdown.js';
 
 /* =====================================================================
    1. Markdown → HTML string (trusted: built from escaped text only)
@@ -22,8 +23,25 @@ const HR_RE = /^\s{0,3}([-*_])(\s*\1){2,}\s*$/;
 const QUOTE_RE = /^\s{0,3}>/;
 const TABLE_SEP_RE = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
 const BLANK_RE = /^\s*$/;
+// Backslash escapes the rich editor's serializer writes for literal syntax characters.
+const ESCAPE_RE = /\\([!-/:-@[-`{-~])/g;
 
 const link = (url, label) => `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+
+/** Preview <img>: nm-media sources are resolved later by hydrateMedia (data-src), https used directly. */
+function imgTag({ src, alt, w }) {
+  const s = esc(src);
+  return `<img ${src.startsWith('nm-media:') ? `data-src="${s}"` : `src="${s}" referrerpolicy="no-referrer"`} alt="${esc(alt)}" loading="lazy"${w ? ` data-w="${w}"` : ''}>`;
+}
+
+/** A line that is only an image or an audio recording → preview figure HTML (else null). */
+function mediaBlock(line) {
+  const img = imageLine(line);
+  if (img) return `<figure class="md-img"${img.w ? ` data-w="${img.w}"` : ''}>${imgTag(img)}</figure>`;
+  const au = audioLine(line);
+  if (au) return `<figure class="md-audio"><audio controls preload="none" data-src="${esc(au.src)}"></audio><figcaption>${esc(au.label)}</figcaption></figure>`;
+  return null;
+}
 
 /** Emphasis on an already-escaped string. */
 function emphasis(s) {
@@ -32,6 +50,7 @@ function emphasis(s) {
     .replace(/__(?=\S)([\s\S]*?\S)__/g, '<strong>$1</strong>')
     .replace(/~~(?=\S)([\s\S]*?\S)~~/g, '<del>$1</del>')
     .replace(/==(?=\S)([\s\S]*?\S)==/g, '<mark>$1</mark>')
+    .replace(/\+\+(?=\S)([\s\S]*?\S)\+\+/g, '<u>$1</u>')
     .replace(/(^|[^*\w])\*(?=\S)([^*\n]*?\S)\*(?!\*)/g, '$1<em>$2</em>')
     .replace(/(^|[^_\w])_(?=\S)([^_\n]*?\S)_(?![_\w])/g, '$1<em>$2</em>');
 }
@@ -39,20 +58,40 @@ function emphasis(s) {
 /** Inline Markdown for one line of raw text. */
 export function inlineMd(src) {
   const tokens = [];
-  const keep = (h) => `\u0000${tokens.push(h) - 1}\u0000`;
+  const plain = [];
+  const keep = (h, p = '') => { plain.push(p); return `\u0000${tokens.push(h) - 1}\u0000`; };
+  const restorePlain = (s) => s.replace(/\u0000(\d+)\u0000/g, (_, i) => plain[Number(i)]);
   let s = String(src ?? '').replace(/\u0000/g, '');
-  s = s.replace(/`([^`\n]+)`/g, (_, c) => keep(`<code>${esc(c)}</code>`));
-  s = s.replace(/\[([^\]\n]+)\]\(\s*<?([^)\s>]+)>?\s*\)/g, (m, text, url) =>
+  // code spans and backslash escapes (leftmost wins, so "\`" is never a code fence)
+  s = s.replace(/(`+)(?!`)([\s\S]*?[^`])\1(?!`)|\\([!-/:-@[-`{-~])/g, (m, fence, code, ch) => {
+    if (fence) {
+      const c = /^ [\s\S]* $/.test(code) && /[^ ]/.test(code) ? code.slice(1, -1) : code;
+      return keep(`<code>${esc(c)}</code>`, c);
+    }
+    return keep(esc(ch), ch);
+  });
+  s = s.replace(/!\[((?:[^\]\n])*)\]\(\s*(\S+?)(?:\s+"([^"\n]*)")?\s*\)/g, (m, alt, url, title) => {
+    const src = safeMediaSrc(url);
+    if (!src) return m;
+    const w = /^w=(\d{1,3})$/.exec(title || '');
+    const n = w ? Math.min(100, Math.max(10, Number(w[1]))) : null;
+    return keep(imgTag({ src, alt: restorePlain(alt), w: n === 100 ? null : n }));
+  });
+  s = s.replace(/\[([^\]\n]+)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"\n]*")?\s*\)/g, (m, text, url) =>
     SAFE_URL.test(url) ? keep(link(url, emphasis(esc(text)))) : m);
-  s = s.replace(/\b(?:https?:\/\/|mailto:)[^\s<>"'`]*[^\s<>"'`.,;:!?)\]]/g, (url) => keep(link(url, esc(url))));
+  s = s.replace(/\b(?:https?:\/\/|mailto:)[^\s<>"'`\u0000]*[^\s<>"'`.,;:!?)\]\u0000]/g, (url) => keep(link(url, esc(url))));
   s = emphasis(esc(s));
-  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => tokens[Number(i)]);
+  for (let k = 0; k < 3 && s.includes('\u0000'); k++) s = s.replace(/\u0000(\d+)\u0000/g, (_, i) => tokens[Number(i)]);
+  return s;
 }
 
-const splitRow = (l) => l.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+/** Split a table row on unescaped pipes ("\|" stays a literal pipe inside the cell). */
+const splitRow = (l) => l.trim().replace(/\\\\/g, '\u0002').replace(/\\\|/g, '\u0001')
+  .replace(/^\|/, '').replace(/\|$/, '').split('|')
+  .map((c) => c.trim().replace(/\u0001/g, '\\|').replace(/\u0002/g, '\\\\'));
 
 function isBlockStart(line) {
-  return FENCE_RE.test(line) || HEADING_RE.test(line) || HR_RE.test(line) || QUOTE_RE.test(line) || LIST_RE.test(line);
+  return FENCE_RE.test(line) || HEADING_RE.test(line) || HR_RE.test(line) || QUOTE_RE.test(line) || LIST_RE.test(line) || !!mediaBlock(line);
 }
 
 function renderList(lines, i, offset) {
@@ -151,6 +190,8 @@ function renderBlocks(lines, offset) {
       i = next;
       continue;
     }
+    const media = mediaBlock(line);
+    if (media) { out.push(media); i++; continue; }
     const para = [];
     while (i < n && !BLANK_RE.test(lines[i]) && (para.length === 0 || !isBlockStart(lines[i]))) para.push(lines[i++]);
     out.push(`<p>${para.map((l) => inlineMd(l.trim())).join('<br />')}</p>`);
@@ -177,10 +218,18 @@ export function toggleTaskLine(content, lineIndex) {
    2. Plain text helpers: snippet, title fallback, stats, checklist
    ===================================================================== */
 
-/** Strip Markdown syntax → readable plain text (for snippets / search highlight). */
+/**
+ * Strip Markdown syntax → readable plain text (for snippets / search highlight).
+ * Media never leaks its nm-media: URL: an image becomes its alt text, an audio
+ * recording "🎙 label". Backslash-escaped characters come out literally.
+ */
 export function plainText(src) {
+  const kept = [];
   return String(src ?? '')
     .replace(/\r\n?/g, '\n')
+    .replace(/\u0000/g, '')
+    .replace(/^[ \t]*\[((?:\\.|[^\]\\\n])*)\]\([ \t]*nm-media:[^\s)]+\.(?:webm|ogg|m4a|mp4|mp3|wav)[ \t]*\)[ \t]*$/gim, (_, l) => `🎙 ${l}`)
+    .replace(ESCAPE_RE, (_, c) => `\u0000${kept.push(c) - 1}\u0000`)
     .replace(/^\s{0,3}(```|~~~).*$/gm, '')
     .replace(/^\s{0,3}#{1,6}\s+/gm, '')
     .replace(/^\s{0,3}>\s?/gm, '')
@@ -190,8 +239,10 @@ export function plainText(src) {
     .replace(/\|/g, ' ')
     .replace(/^\s{0,3}([-*_])(\s*\1){2,}\s*$/gm, '')
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/(\*\*|__|~~|==|`)/g, '')
-    .replace(/(^|\s)[*_](\S[^*_]*?)[*_](?=\s|$|[.,;:!?])/g, '$1$2');
+    .replace(/(==|\+\+)(?=\S)([^\n]*?\S)\1/g, '$2')
+    .replace(/(\*\*|__|~~|`)/g, '')
+    .replace(/(^|\s)[*_](\S[^*_]*?)[*_](?=\s|$|[.,;:!?])/g, '$1$2')
+    .replace(/\u0000(\d+)\u0000/g, (_, i) => kept[Number(i)]);
 }
 
 /** One-line snippet (≤ max chars) skipping the line that duplicates the title. */
@@ -504,30 +555,90 @@ export function openPopover(anchor, tpl, { onOpen, label = '', className = '' } 
   return openPop;
 }
 
-/** Toolbar definition shared by the editor (label, icon or glyph, shortcut). */
-export const TOOLS = [
-  { id: 'h1', glyph: 'H1', label: 'Tiêu đề lớn', keys: 'Ctrl+Alt+1' },
-  { id: 'h2', glyph: 'H2', label: 'Tiêu đề mục', keys: 'Ctrl+Alt+2' },
-  'sep',
-  { id: 'bold', glyph: 'B', label: 'Đậm', keys: 'Ctrl+B', cls: 'is-bold' },
-  { id: 'italic', glyph: 'I', label: 'Nghiêng', keys: 'Ctrl+I', cls: 'is-italic' },
-  { id: 'strike', glyph: 'S', label: 'Gạch ngang', keys: 'Ctrl+Shift+X', cls: 'is-strike' },
-  { id: 'mark', glyph: 'M', label: 'Tô sáng', keys: 'Ctrl+Shift+H', cls: 'is-mark' },
-  'sep',
-  { id: 'ul', icon: 'list', label: 'Danh sách', keys: 'Ctrl+Shift+8' },
-  { id: 'ol', glyph: '1.', label: 'Danh sách số', keys: 'Ctrl+Shift+7' },
-  { id: 'task', icon: 'checkCircle', label: 'Việc cần làm', keys: 'Ctrl+Shift+9' },
-  { id: 'quote', glyph: '“', label: 'Trích dẫn', keys: 'Ctrl+Shift+.' },
-  'sep',
-  { id: 'code', glyph: '</>', label: 'Mã', keys: 'Ctrl+E' },
-  { id: 'link', icon: 'link', label: 'Liên kết', keys: 'Ctrl+K' },
-  { id: 'hr', glyph: '—', label: 'Đường kẻ' },
-  'sep',
-  { id: 'line-task', icon: 'tasks', label: 'Tạo công việc từ dòng này', text: 'Việc' },
+/** Extra toolbar glyphs (same 24px / 1.6 stroke style as icons.js). */
+const SVG = {
+  clear: '<path d="M6 5h12M12 5l-3 14"/><path d="m15 14 5 5M20 14l-5 5"/>',
+  table: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M3.5 14.5h17M9.5 9.5v10M14.5 9.5v10"/>',
+  image: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m20.5 16-4.5-4.5-8.5 8"/>',
+  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/>',
+  redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>',
+};
+const svg = (name) => raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SVG[name]}</svg>`);
+
+/** Block styles of the "Kiểu chữ" menu: id → editor exec command. */
+export const BLOCK_STYLES = [
+  { id: 'p', label: 'Đoạn văn', keys: 'Ctrl+Alt+0' },
+  { id: 'h1', label: 'Tiêu đề 1', keys: 'Ctrl+Alt+1' },
+  { id: 'h2', label: 'Tiêu đề 2', keys: 'Ctrl+Alt+2' },
+  { id: 'h3', label: 'Tiêu đề 3', keys: 'Ctrl+Alt+3' },
+  { id: 'quote', label: 'Trích dẫn' },
+  { id: 'code', label: 'Khối mã' },
 ];
 
+/**
+ * Toolbar of the rich editor (also drives the Markdown textarea in source mode).
+ * - `toggle`: carries aria-pressed (painted from the editor's activeState)
+ * - `menu`: opens a menu / popover
+ * - `prio`: 1 = stays visible longest; when the row runs out of space the page moves
+ *   tools into the "⋯ Thêm" menu, highest prio number first (priority+ pattern)
+ * - `only: 'desk' | 'phone'`: the "Kiểu chữ" menu on wide screens, H1–H3 / quote
+ *   buttons in the phone's scrolling bar.
+ */
+export const TOOLS = [
+  { id: 'block', label: 'Kiểu chữ', menu: true, prio: 1, only: 'desk' },
+  { id: 'h1', glyph: 'H1', label: 'Tiêu đề 1', keys: 'Ctrl+Alt+1', toggle: true, only: 'phone' },
+  { id: 'h2', glyph: 'H2', label: 'Tiêu đề 2', keys: 'Ctrl+Alt+2', toggle: true, only: 'phone' },
+  { id: 'h3', glyph: 'H3', label: 'Tiêu đề 3', keys: 'Ctrl+Alt+3', toggle: true, only: 'phone' },
+  'sep',
+  { id: 'bold', glyph: 'B', label: 'Đậm', keys: 'Ctrl+B', cls: 'is-bold', toggle: true, prio: 1 },
+  { id: 'italic', glyph: 'I', label: 'Nghiêng', keys: 'Ctrl+I', cls: 'is-italic', toggle: true, prio: 1 },
+  { id: 'underline', glyph: 'U', label: 'Gạch chân', keys: 'Ctrl+U', cls: 'is-underline', toggle: true, prio: 2 },
+  { id: 'strike', glyph: 'S', label: 'Gạch ngang', keys: 'Ctrl+Shift+X', cls: 'is-strike', toggle: true, prio: 4 },
+  { id: 'mark', glyph: 'A', label: 'Tô sáng', keys: 'Ctrl+Shift+H', cls: 'is-mark', toggle: true, prio: 3 },
+  'sep',
+  { id: 'ul', icon: 'list', label: 'Danh sách', keys: 'Ctrl+Shift+8', toggle: true, prio: 2 },
+  { id: 'ol', glyph: '1.', label: 'Danh sách số', keys: 'Ctrl+Shift+7', toggle: true, prio: 3 },
+  { id: 'task', icon: 'checkSquare', label: 'Việc cần làm', keys: 'Ctrl+Shift+9', toggle: true, prio: 1 },
+  { id: 'quote', glyph: '“', label: 'Trích dẫn', cls: 'is-quote', toggle: true, only: 'phone' },
+  'sep',
+  { id: 'link', icon: 'link', label: 'Liên kết', keys: 'Ctrl+K', toggle: true, menu: true, prio: 3 },
+  { id: 'image', svg: 'image', label: 'Chèn ảnh', prio: 2 },
+  { id: 'record', svg: 'mic', label: 'Ghi âm cuộc họp', prio: 3 },
+  'sep',
+  { id: 'undo', icon: 'undo', label: 'Hoàn tác', keys: 'Ctrl+Z', prio: 2 },
+  { id: 'redo', svg: 'redo', label: 'Làm lại', keys: 'Ctrl+Y', prio: 4 },
+  'sep',
+  // Secondary: first to move into "⋯ Thêm" when space runs out.
+  { id: 'case', glyph: 'Aa', label: 'Đổi kiểu chữ hoa / thường', keys: 'Ctrl+Shift+U', cls: 'is-case', menu: true, prio: 8 },
+  { id: 'clear', svg: 'clear', label: 'Xóa định dạng', keys: 'Ctrl+\\', prio: 8 },
+  { id: 'code', glyph: '</>', label: 'Mã', keys: 'Ctrl+E', toggle: true, prio: 8 },
+  { id: 'table', svg: 'table', label: 'Bảng', prio: 8 },
+  { id: 'hr', glyph: '—', label: 'Đường kẻ', prio: 9 },
+  { id: 'find', icon: 'search', label: 'Tìm và thay thế', keys: 'Ctrl+F · Ctrl+H', prio: 7 },
+  { id: 'line-task', icon: 'tasks', label: 'Tạo công việc từ dòng này', text: 'Việc', prio: 7 },
+  { id: 'more', icon: 'more', label: 'Thêm công cụ', menu: true, only: 'desk' },
+];
+
+function toolGlyph(t) {
+  if (t.id === 'block') {
+    return html`<span class="nb-tool__block" data-block-label>${BLOCK_STYLES[0].label}</span>${icon('chevronDown')}`;
+  }
+  return t.icon ? icon(t.icon) : t.svg ? svg(t.svg) : html`<span aria-hidden="true">${t.glyph}</span>`;
+}
+
+/** Buttons for a role="toolbar" container: one tab stop (roving tabindex). */
 export function toolbarTpl() {
-  return html`${TOOLS.map((t) => (t === 'sep'
-    ? html`<span class="nb-tools__sep" aria-hidden="true"></span>`
-    : html`<button type="button" class="nb-tool ${t.cls || ''} ${t.text ? 'nb-tool--text' : ''}" data-tool="${t.id}" title="${t.label}${t.keys ? ` (${t.keys})` : ''}" aria-label="${t.label}">${t.icon ? icon(t.icon) : html`<span aria-hidden="true">${t.glyph}</span>`}${t.text ? html`<span>${t.text}</span>` : ''}</button>`))}`;
+  let first = true;
+  return html`${TOOLS.map((t) => {
+    if (t === 'sep') return html`<span class="nb-tools__sep" aria-hidden="true"></span>`;
+    const tab = first ? '0' : '-1';
+    first = false;
+    const cls = [
+      'nb-tool', t.cls || '', t.text ? 'nb-tool--text' : '', t.only ? `nb-tool--${t.only}` : '',
+      t.id === 'block' ? 'nb-tool--block' : '', t.id === 'more' ? 'nb-tool--more' : '',
+    ].filter(Boolean).join(' ');
+    const popup = t.menu ? raw(` aria-haspopup="${t.id === 'link' ? 'dialog' : 'menu'}"${t.id === 'more' || t.id === 'block' || t.id === 'case' ? ' aria-expanded="false"' : ''}`) : '';
+    const keys = t.keys ? raw(` aria-keyshortcuts="${t.keys.split(' · ')[0].replace('Ctrl', 'Control')}"`) : '';
+    return html`<button type="button" class="${cls}" data-tool="${t.id}" data-prio="${t.prio || 0}" tabindex="${tab}" title="${t.label}${t.keys ? ` (${t.keys})` : ''}" aria-label="${t.label}"${t.toggle ? raw(' aria-pressed="false"') : ''}${popup}${keys}${t.id === 'more' ? raw(' hidden') : ''}>${toolGlyph(t)}${t.text ? html`<span>${t.text}</span>` : ''}</button>`;
+  })}`;
 }

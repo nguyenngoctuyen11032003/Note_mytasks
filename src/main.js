@@ -12,7 +12,7 @@ import { current, navigate, onRouteChange } from './core/router.js';
 import { html, mount } from './utils/dom.js';
 import { configureDates } from './utils/date.js';
 import { configureFormat } from './utils/format.js';
-import { getSession, onAuthChange, signOut } from './services/auth.js';
+import { getSession, onAuthChange, signOut, verifyEmailLink } from './services/auth.js';
 import { getProfile } from './services/profile.js';
 import { listCategories } from './services/categories.js';
 import { mountShell, unmountShell, isMounted, setActive, focusContent } from './components/shell.js';
@@ -23,11 +23,12 @@ import { refreshRunning } from './components/timer.js';
 import { toast } from './components/toast.js';
 import { popMenu } from './components/ui.js';
 import { openTaskForm } from './components/taskForm.js';
-import { errorState } from './components/states.js';
+import { errorState, loadingRows } from './components/states.js';
 import { notifyDataChanged } from './core/events.js';
 import { initLiquidGlass } from './components/liquidGlass.js';
-import { initMotion } from './components/motion.js';
+import { enterContent } from './components/motion.js';
 import { applySkin, currentSkin } from './components/skin.js';
+import './css/perf.css'; // last: performance overrides must beat the skins (skin.js pulls in theme-zodiac.css)
 
 const app = document.getElementById('app');
 
@@ -44,6 +45,37 @@ const PRIVATE = {
   '/settings': () => import('./pages/settings.js'),
 };
 const PUBLIC = ['/login', '/signup', '/forgot-password'];
+/** Pages that redraw their own charts on onThemeChange (no full re-render needed). */
+const SELF_THEMED = new Set(['/expenses', '/reports', '/time']);
+
+/* Route chunks: import() is memoised, so a prefetch is just an early call. */
+const loadAuthPage = () => import('./pages/auth.js');
+function prefetchRoute(path) {
+  const load = PRIVATE[path] || (PUBLIC.includes(path) || path === '/reset-password' ? loadAuthPage : null);
+  load?.().catch(() => {}); // a real navigation retries and shows the error
+}
+
+/** Warm the remaining pages once the first one is up — one per idle slot, never on data saver. */
+function prefetchIdle() {
+  const c = navigator.connection;
+  if (c && (c.saveData || /2g/.test(c.effectiveType || ''))) return;
+  const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 400));
+  const queue = Object.keys(PRIVATE);
+  const next = () => {
+    const p = queue.shift();
+    if (!p) return;
+    prefetchRoute(p);
+    idle(next, { timeout: 4000 });
+  };
+  idle(next, { timeout: 4000 });
+}
+
+/** Hover / touch / focus on an in-app link → start loading that page before the click lands. */
+function prefetchOnIntent(e) {
+  const a = e.target.closest?.('a[href^="#/"]');
+  if (a) prefetchRoute(a.getAttribute('href').slice(1).split('?')[0]);
+}
+['pointerover', 'touchstart', 'focusin'].forEach((t) => document.addEventListener(t, prefetchOnIntent, { passive: true }));
 const RECOVERY = '/reset-password';
 
 let content = null;
@@ -68,9 +100,30 @@ function homePath() {
 
 /* ------------------------------------------------------------------ */
 
-async function loadUserContext(session) {
-  store.set({ session, user: session.user });
-  const [profile, categories] = await Promise.all([getProfile(session.user.id), listCategories()]);
+/*
+ * User context cache: profile + categories of the last signed-in user, kept in
+ * localStorage (wiped on sign-out, see store.clearUserState). Boot paints the
+ * first page from it at once instead of waiting a network round trip, then
+ * revalidates in the background and re-renders only if something that changes
+ * the rendering (timezone, week start, currency, categories) differs.
+ */
+const CTX_KEY = 'nm.ctx';
+function readCtx(uid) {
+  try {
+    const c = JSON.parse(localStorage.getItem(CTX_KEY) || 'null');
+    return c && c.uid === uid && c.profile ? c : null;
+  } catch { return null; }
+}
+function writeCtx(uid, profile, categories) {
+  try { localStorage.setItem(CTX_KEY, JSON.stringify({ uid, profile, categories })); } catch { /* quota / private mode */ }
+}
+// Settings / category edits update the store: keep the cache in step.
+store.subscribe((s, patch) => {
+  if (('profile' in patch || 'categories' in patch) && s.user && s.profile) writeCtx(s.user.id, s.profile, s.categories);
+});
+const renderKey = (profile, categories) => JSON.stringify([profile?.timezone, profile?.week_starts_on, profile?.currency, categories]);
+
+function applyCtx(profile, categories) {
   store.set({ profile, categories });
   if (profile) {
     configureDates({ timezone: profile.timezone, weekStartsOn: profile.week_starts_on });
@@ -78,17 +131,90 @@ async function loadUserContext(session) {
     // Profile is the source of truth for the theme across devices.
     if (profile.theme && profile.theme !== currentThemePref()) applyTheme(profile.theme, { persist: true });
   }
-  refreshRunning().catch(() => {});
 }
+
+async function loadUserContext(session) {
+  store.set({ session, user: session.user });
+  const uid = session.user.id;
+  const cached = readCtx(uid);
+  const fresh = Promise.all([getProfile(uid), listCategories()]).then(([profile, categories]) => {
+    writeCtx(uid, profile, categories);
+    return { profile, categories };
+  });
+  refreshRunning().catch(() => {});
+  if (!cached) {
+    const { profile, categories } = await fresh;
+    applyCtx(profile, categories);
+    return;
+  }
+  applyCtx(cached.profile, cached.categories || []);
+  fresh.then(({ profile, categories }) => {
+    if (store.get().user?.id !== uid) return; // signed out / switched meanwhile
+    const changed = renderKey(profile, categories) !== renderKey(cached.profile, cached.categories || []);
+    applyCtx(profile, categories);
+    if (changed && isMounted()) render({ keepScroll: true });
+  }).catch((err) => { if (err?.sessionExpired) expireSession(); });
+}
+
+const AUTH_ERRORS = {
+  otp_expired: 'Liên kết trong email đã hết hạn hoặc đã được dùng. Hãy yêu cầu gửi lại liên kết mới.',
+  access_denied: 'Liên kết không còn hợp lệ. Hãy yêu cầu gửi lại liên kết mới.',
+};
 
 function cleanAuthParams() {
   // PKCE returns ?code=… — remove it after supabase-js has exchanged it.
+  // Supabase reports link errors either as ?error=… or as #error=… (implicit
+  // style); the hash form would otherwise be read as a route by the router.
   const url = new URL(window.location.href);
-  if (url.searchParams.has('code') || url.searchParams.has('error') || url.searchParams.has('error_description')) {
-    const err = url.searchParams.get('error_description');
-    ['code', 'error', 'error_code', 'error_description', 'type'].forEach((k) => url.searchParams.delete(k));
+  const hash = new URLSearchParams(url.hash.replace(/^#\/?/, ''));
+  const hashError = hash.has('error') || hash.has('error_code');
+  if (url.searchParams.has('code') || url.searchParams.has('error') || url.searchParams.has('error_description') || hashError) {
+    const code = url.searchParams.get('error_code') || hash.get('error_code') || url.searchParams.get('error') || hash.get('error');
+    const raw = url.searchParams.get('error_description') || hash.get('error_description');
+    ['code', 'error', 'error_code', 'error_description', 'type', 'flow'].forEach((k) => url.searchParams.delete(k));
+    if (hashError) url.hash = '';
     window.history.replaceState(null, '', url);
-    if (err) setTimeout(() => toast.error(decodeURIComponent(err.replace(/\+/g, ' '))), 300);
+    const msg = AUTH_ERRORS[code] || (raw ? decodeURIComponent(raw.replace(/\+/g, ' ')) : null);
+    if (msg) {
+      setTimeout(() => toast.error(msg), 300);
+      if (code === 'otp_expired' || code === 'access_denied') navigate('/forgot-password', null, { replace: true });
+    }
+  }
+}
+
+/** token_hash links from the custom email templates (supabase/templates/*.html). */
+function emailLinkParams() {
+  const search = Object.fromEntries(new URL(window.location.href).searchParams);
+  const q = { ...search, ...current().query };
+  return q.token_hash && q.type ? { tokenHash: q.token_hash, type: q.type } : null;
+}
+
+/**
+ * Spends a token_hash link: recovery → reset-password page, sign-up
+ * confirmation → signed in. Returns the resulting session (or the old one).
+ */
+async function handleEmailLink({ tokenHash, type }, session) {
+  // Strip the token from the address bar first so a reload never re-submits it.
+  const url = new URL(window.location.href);
+  url.search = '';
+  url.hash = '';
+  window.history.replaceState(null, '', url);
+  try {
+    const data = await verifyEmailLink(tokenHash, type);
+    const s = data?.session || null;
+    if (type === 'recovery') {
+      recoveryMode = true;
+      if (s) store.set({ session: s, user: s.user });
+      navigate(RECOVERY, null, { replace: true });
+    } else {
+      setTimeout(() => toast('Đã xác nhận email. Chào mừng bạn đến với Stratos!'), 300);
+      navigate(s ? homePath() : '/login', null, { replace: true });
+    }
+    return s || session;
+  } catch (err) {
+    setTimeout(() => toast.error(err), 300);
+    navigate(type === 'recovery' ? '/forgot-password' : '/login', null, { replace: true });
+    return session;
   }
 }
 
@@ -134,16 +260,25 @@ async function render(opts) {
   setActive(path);
   runCleanup();
   const restoreY = keepScroll ? window.scrollY : scrollTarget();
-  content.classList.remove('is-entering');
-  content.innerHTML = '';
-  void content.offsetWidth;
-  if (!keepScroll) content.classList.add('is-entering');
+  // Theme re-render: keep the old page on screen until the new one replaces it (no flash).
+  if (!keepScroll) {
+    content.innerHTML = '';
+    enterContent(content);
+  }
   if (!restoreY) window.scrollTo({ top: 0 });
   content.setAttribute('aria-busy', 'true');
 
+  // A page chunk that is not cached yet: show a skeleton instead of a blank
+  // screen if it takes longer than a blink.
+  const skeleton = keepScroll ? null : setTimeout(() => {
+    if (token === renderToken && !content.firstChild) mount(content, html`<div class="page-loading">${loadingRows(6)}</div>`);
+  }, 120);
+
   try {
     const mod = await PRIVATE[path]();
+    clearTimeout(skeleton);
     if (token !== renderToken) return;
+    if (!keepScroll) content.innerHTML = '';
     pageAbort = new AbortController();
     const dispose = (await mod.default(content, { query, path, signal: pageAbort.signal })) || null;
     // A newer navigation started while this page was loading: tear this page
@@ -160,6 +295,7 @@ async function render(opts) {
     // the page moved focus itself (deep link opened a dialog, autofocus…).
     const first = firstPrivateRender;
     firstPrivateRender = false;
+    if (first) prefetchIdle();
     if (!first && !keepScroll) {
       const a = document.activeElement;
       const pageTookFocus = document.querySelector('dialog[open]') || (a && content.contains(a) && a.matches('input, textarea, select, [contenteditable]'));
@@ -180,7 +316,7 @@ async function renderAuthPage(kind, query, token) {
   unmountShell();
   content = null;
   firstPrivateRender = true;
-  const mod = await import('./pages/auth.js');
+  const mod = await loadAuthPage();
   if (token !== renderToken) return;
   document.title = 'Stratos';
   cleanup = mod.default(app, { kind, query }) || null;
@@ -251,11 +387,26 @@ async function boot() {
     return;
   }
 
+  // Download the landing page's chunk while the session / profile requests are
+  // in flight, instead of only after them (boot was a strict waterfall).
+  const p0 = current().path;
+  prefetchRoute(p0 === '/' || p0 === '' ? homePath() : p0);
+
   let session = null;
   try {
     session = await getSession();
   } catch (err) {
     toast.error(err);
+  }
+  const emailLink = emailLinkParams();
+  if (emailLink) session = await handleEmailLink(emailLink, session);
+  // Legacy PKCE recovery link (?flow=recovery&code=…): supabase-js already
+  // exchanged the code inside getSession(), firing PASSWORD_RECOVERY before
+  // we subscribed — route to the reset page from the flow marker instead.
+  const params = new URL(window.location.href).searchParams;
+  if (!emailLink && params.get('flow') === 'recovery' && params.has('code') && session) {
+    recoveryMode = true;
+    navigate(RECOVERY, null, { replace: true });
   }
   cleanAuthParams();
 
@@ -298,8 +449,14 @@ async function boot() {
   });
 
   onRouteChange(() => render());
-  // Charts read colours from CSS tokens: re-render the page on theme change.
-  onThemeChange(() => { if (isMounted()) render({ keepScroll: true }); });
+  // Everything styled by CSS tokens follows a theme change by itself. Only
+  // canvas charts bake colours in at draw time; pages that redraw their own
+  // charts on onThemeChange are left alone, the rest (with a chart on screen)
+  // re-render. Previously every page refetched all its data on a theme flip.
+  onThemeChange(() => {
+    if (!isMounted() || !content || SELF_THEMED.has(current().path)) return;
+    if (content.querySelector('canvas')) render({ keepScroll: true });
+  });
   render();
 }
 
@@ -446,4 +603,4 @@ initOfflineBanner();
 registerServiceWorker();
 boot();
 initLiquidGlass();
-initMotion();
+

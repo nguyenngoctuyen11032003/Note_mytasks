@@ -366,7 +366,8 @@ export async function notesReport({ from, to, prevFrom, prevTo }) {
     const mod = await load();
     if (typeof mod.listNotes !== 'function') return null;
     // archived: null → active + archived notes (trash excluded).
-    const lists = [await mod.listNotes({ limit: 2000, archived: null })];
+    // light: counts and titles only — never download every note's body.
+    const lists = [await mod.listNotes({ limit: 2000, archived: null, light: true })];
     const seen = new Map();
     lists.flat().forEach((n) => { if (n && n.id != null && n.created_at) seen.set(n.id, n); });
     const all = [...seen.values()];

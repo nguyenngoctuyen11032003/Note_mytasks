@@ -1190,7 +1190,7 @@ export default async function timePage(root, { query, signal }) {
     refresh();
     scheduleReload();
   }));
-  disposers.push(onDataChanged(scheduleReload));
+  disposers.push(onDataChanged((kind) => { if (kind !== 'expenses' && kind !== 'notes') scheduleReload(); }));
   // Chart colours are resolved from CSS tokens at draw time: redraw on theme switch.
   disposers.push(onThemeChange(() => { if (loaded) requestAnimationFrame(renderCharts); }));
 

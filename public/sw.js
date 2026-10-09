@@ -8,8 +8,13 @@
  *
  * Strategies
  *   navigations / HTML          network-first, fall back to cached shell
- *   same-origin static files    stale-while-revalidate
- *   Google Fonts (css + woff2)  stale-while-revalidate (separate cache)
+ *                               (also after NAV_TIMEOUT on a stalled network)
+ *   hashed build files assets/* cache-first — the name changes with the
+ *                               content, so a cached copy is never stale and
+ *                               startup no longer re-requests every chunk
+ *   other same-origin files     stale-while-revalidate
+ *   Google Fonts css            stale-while-revalidate (separate cache)
+ *   Google Fonts woff2          cache-first (immutable URLs)
  *   everything else             not intercepted — Supabase API/auth
  *                               (*.supabase.co) is NEVER cached.
  */
@@ -20,6 +25,7 @@ const PREFIX = 'nm-';
 const SHELL = `${PREFIX}shell-${BUILD}`;
 const FONTS = `${PREFIX}fonts-v1`;
 const KEEP = new Set([SHELL, FONTS]);
+const NAV_TIMEOUT = 3500; // ms before a slow navigation falls back to the cached shell
 
 const scopeUrl = new URL(self.registration.scope);
 const INDEX = new URL('./index.html', scopeUrl).href;
@@ -87,20 +93,27 @@ self.addEventListener('fetch', (event) => {
   }
   if (isOwn(url)) {
     if (url.pathname.endsWith('/sw.js')) return;
-    event.respondWith(staleWhileRevalidate(event, SHELL));
+    const hashed = url.pathname.startsWith(scopeUrl.pathname + 'assets/');
+    event.respondWith(hashed ? cacheFirst(event, SHELL) : staleWhileRevalidate(event, SHELL));
     return;
   }
   if (isFont(url)) {
-    event.respondWith(staleWhileRevalidate(event, FONTS));
+    event.respondWith(url.hostname === 'fonts.gstatic.com' ? cacheFirst(event, FONTS) : staleWhileRevalidate(event, FONTS));
   }
   // Any other cross-origin request goes straight to the network.
 });
 
 async function networkFirst(event) {
   const cache = await caches.open(SHELL);
+  const network = Promise.resolve(event.preloadResponse).then((pre) => pre || fetch(event.request));
+  network.catch(() => {}); // may settle after the timeout: no unhandled rejection
   try {
-    const preload = await event.preloadResponse;
-    const res = preload || (await fetch(event.request));
+    // Lie-fi must not hold the app on a blank screen: with a cached shell,
+    // give the network NAV_TIMEOUT, then serve the shell.
+    const hasShell = Boolean(await cache.match(INDEX));
+    const res = hasShell
+      ? await Promise.race([network, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), NAV_TIMEOUT))])
+      : await network;
     // Cache the shell without the query string (?code=… from auth redirects).
     if (res && res.ok && res.type === 'basic') cache.put(INDEX, res.clone()).catch(() => {});
     return res;
@@ -108,6 +121,19 @@ async function networkFirst(event) {
     const hit = (await cache.match(INDEX)) || (await cache.match(ROOT));
     if (hit) return hit;
     throw err;
+  }
+}
+
+async function cacheFirst(event, cacheName) {
+  const cache = await caches.open(cacheName);
+  const hit = await cache.match(event.request);
+  if (hit) return hit;
+  try {
+    const res = await fetch(event.request);
+    if (res && (res.ok || res.type === 'opaque')) cache.put(event.request, res.clone()).catch(() => {});
+    return res;
+  } catch {
+    return new Response('', { status: 504, statusText: 'Offline' });
   }
 }
 

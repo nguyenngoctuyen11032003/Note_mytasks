@@ -153,9 +153,25 @@ function queue() {
 
 const ro = supported ? new ResizeObserver((entries) => entries.forEach((e) => apply(e.target))) : null;
 
+/**
+ * Only rescan when a mutation actually brought in a glass control. Most
+ * mutations are typing / list updates; a full scan there reads layout for
+ * every control on every frame (forced reflow while the user types).
+ */
+function relevant(records) {
+  for (const r of records) {
+    for (const n of r.addedNodes) {
+      if (n.nodeType !== 1) continue;
+      if (n.matches(SELECTOR) || n.querySelector(SELECTOR)) return true;
+    }
+  }
+  return false;
+}
+
 export function initLiquidGlass() {
   if (!supported) return;
-  new MutationObserver(queue).observe(document.body, { childList: true, subtree: true });
+  new MutationObserver((records) => { if (relevant(records)) queue(); })
+    .observe(document.body, { childList: true, subtree: true });
   window.addEventListener('resize', queue);
   queue();
 }

@@ -1,0 +1,214 @@
+/* Stratos auth sphere (src/components/auth/sphere.js).
+   Consumes the .lux tokens defined by auth.css; everything is clipped inside .lxs. */
+
+.lxs {
+  --lxs-persp: 920px;
+  --lxs-hw: min(calc(var(--lxs-w, 800px) * .7), 560px);
+  --lxs-wash: #000;
+  --cw: 120px;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  perspective: var(--lxs-persp);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: grab;
+}
+.lxs.is-dragging { cursor: grabbing; }
+
+@media (pointer: coarse) {
+  .lxs { touch-action: pan-y; }
+}
+
+.lux .lxs { --lxs-wash: var(--lux-bg); }
+
+.lxs__world {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+.lxs__orb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  transform-style: preserve-3d;
+}
+
+/* ---- field-note tiles ---- */
+.lxs__card {
+  --tone: 217 154 98;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--cw);
+  aspect-ratio: 3 / 2;
+  margin-left: calc(var(--cw) / -2);
+  margin-top: calc(var(--cw) / -3);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: calc(var(--cw) * .025);
+  padding: calc(var(--cw) * .08) calc(var(--cw) * .09);
+  background:
+    linear-gradient(150deg, rgb(var(--tone) / .16), rgb(var(--tone) / 0) 62%),
+    var(--lux-card);
+  border: 1px solid var(--lux-line);
+  border-radius: 4px;
+  color: var(--lux-ink);
+  overflow: hidden;
+  transition: border-color .3s var(--lux-ease), box-shadow .3s var(--lux-ease);
+}
+.lxs__card[data-tone='1'] { --tone: 64 150 150; }
+.lxs__card[data-tone='2'] { --tone: 204 160 64; }
+.lxs__card[data-tone='3'] { --tone: 206 120 128; }
+.lxs__card[data-tone='4'] { --tone: 128 164 116; }
+
+/* Depth wash: black in the night theme, paper in the light theme. */
+.lxs__card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--lxs-wash);
+  opacity: var(--d, 0);
+  pointer-events: none;
+}
+
+.lxs__icon {
+  position: absolute;
+  top: calc(var(--cw) * .07);
+  left: calc(var(--cw) * .08);
+  width: 18px;
+  height: 18px;
+  color: var(--lux-accent);
+  line-height: 0;
+}
+.lxs__icon svg { width: 100%; height: 100%; }
+
+.lxs__value {
+  font-family: var(--lux-serif);
+  font-weight: 400;
+  font-size: calc(var(--cw) * .2);
+  line-height: 1;
+  letter-spacing: -.01em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.lxs__label {
+  font-family: var(--lux-sans);
+  font-size: max(7px, calc(var(--cw) * .068));
+  line-height: 1.2;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--lux-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lxs.has-pick .lxs__card:not(.is-picked)::after { opacity: min(.92, calc(var(--d, 0) + .42)); }
+.lxs__card.is-picked {
+  border-color: var(--lux-accent);
+  box-shadow: 0 0 0 1px var(--lux-accent), 0 10px 40px rgb(0 0 0 / .28);
+}
+.lxs__card.is-picked::after { opacity: calc(var(--d, 0) * .5); }
+
+/* ---- headline at the sphere origin ---- */
+.lxs__head {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--lxs-hw);
+  margin: 0 0 0 calc(var(--lxs-hw) / -2);
+  padding: 0;
+  text-align: center;
+  pointer-events: none;
+  font-family: var(--lux-serif);
+  font-weight: 400;
+  font-size: clamp(24px, 3.2vw, 50px);
+  line-height: 1.06;
+  letter-spacing: -.01em;
+  color: var(--lux-ink);
+  text-shadow:
+    0 1px 2px color-mix(in srgb, var(--lux-bg) 70%, transparent),
+    0 0 28px color-mix(in srgb, var(--lux-bg) 85%, transparent);
+  text-wrap: balance;
+}
+.lxs__inner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  transform: translateY(-50%);
+}
+.lxs__w {
+  display: inline-block;
+  opacity: 0;
+  transform: translateY(.42em);
+  filter: blur(7px);
+  transition:
+    opacity .9s var(--lux-ease),
+    transform 1.1s var(--lux-rise),
+    filter .9s var(--lux-ease);
+  transition-delay: calc(.6s + var(--i, 0) * .085s);
+}
+.lux.is-revealed .lxs__head .lxs__w {
+  opacity: 1;
+  transform: none;
+  filter: none;
+}
+
+/* ---- caption ---- */
+.lxs__caption {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  max-width: calc(100% - 32px);
+  margin: 0;
+  transform: translate(-50%, 6px);
+  font-family: var(--lux-sans);
+  font-size: 12px;
+  line-height: 1.4;
+  letter-spacing: .04em;
+  color: var(--lux-dim);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .35s var(--lux-ease), transform .35s var(--lux-ease);
+}
+.lxs__caption.is-on { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---- breakpoints ---- */
+@media (max-width: 640px) {
+  .lxs { --lxs-hw: min(calc(var(--lxs-w, 360px) * .86), 340px); }
+  .lxs__head { font-size: clamp(22px, 6.6vw, 32px); }
+}
+@media (orientation: landscape) and (max-height: 560px) {
+  .lxs__head { font-size: clamp(18px, 4.8vh, 26px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lxs__w {
+    filter: none;
+    transform: none;
+    transition: opacity .14s linear;
+    transition-delay: 0s;
+  }
+  .lxs__card,
+  .lxs__caption { transition-duration: .14s; }
+}
+
+/* Back of the sphere: the tile is seen from behind, so keep only its plate. */
+.lxs__card > * { transition: opacity .25s var(--lux-ease); }
+.lxs__card.is-back > * { opacity: 0; }

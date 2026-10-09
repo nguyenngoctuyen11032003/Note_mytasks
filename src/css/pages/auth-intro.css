@@ -1,0 +1,136 @@
+/* Auth intro: session splash (#lux-splash) + blend-difference cursor dot (.lxc).
+   The splash lives on <body>, outside .lux, so it redefines the contract tokens. */
+
+.lxi-splash {
+  --lux-bg: #ece4da;
+  --lux-ink: #173f47;
+  --lux-dim: rgba(23, 63, 71, .66);
+  --lux-line: rgba(23, 90, 103, .22);
+  --lux-accent: #175A67;
+  --lux-serif: 'Playfair Display', 'Times New Roman', serif;
+  --lux-sans: var(--font-sans, system-ui, sans-serif);
+  --lux-ease: cubic-bezier(.22, .61, .36, 1);
+  --lux-rise: cubic-bezier(.22, 1, .36, 1);
+}
+
+.lxi-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 250;
+  display: grid;
+  place-items: center;
+  place-content: center;
+  gap: 26px;
+  padding: env(safe-area-inset-top, 0) 16px env(safe-area-inset-bottom, 0);
+  background: var(--lux-bg, #0b0605);
+  color: var(--lux-ink, #f4ece2);
+  font-family: var(--lux-sans);
+  clip-path: inset(0 0 0 0);
+  transition: clip-path .9s var(--lux-ease);
+  will-change: clip-path;
+}
+.lxi-splash > * {
+  margin: 0;
+  opacity: 0;
+  animation: lxi-rise .72s var(--lux-rise) forwards;
+}
+.lxi-splash > :nth-child(1) { animation-delay: .05s; }
+.lxi-splash > :nth-child(2) { animation-delay: .16s; }
+.lxi-splash > :nth-child(3) { animation-delay: .27s; }
+.lxi-splash > :nth-child(4) { animation-delay: .38s; }
+
+.lxi-splash__logo {
+  display: block;
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+}
+/* Breathe uses the `scale` property so it doesn't fight riseIn's transform. */
+.lxi-splash__logo { animation: lxi-rise .72s var(--lux-rise) .05s forwards, lxi-breathe 2.6s ease-in-out .8s infinite; }
+
+.lxi-splash__word {
+  font-family: var(--lux-serif);
+  font-size: clamp(30px, 4.6vw, 56px);
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -.01em;
+  color: var(--lux-ink, #f4ece2);
+}
+.lxi-splash__word em {
+  font-style: normal;
+  color: var(--lux-accent, #d99a62);
+}
+
+.lxi-splash__bar {
+  position: relative;
+  width: clamp(120px, 17vw, 210px);
+  height: 1px;
+  overflow: hidden;
+  background: var(--lux-line, rgba(244, 236, 226, .16));
+}
+.lxi-splash__bar s {
+  position: absolute;
+  inset: 0;
+  background: var(--lux-ink, #f4ece2);
+  transform: scaleX(0);
+  transform-origin: left center;
+  text-decoration: none;
+}
+
+.lxi-splash__tag {
+  font-size: 10px;
+  letter-spacing: .26em;
+  text-transform: uppercase;
+  color: var(--lux-dim, rgba(244, 236, 226, .62));
+}
+
+/* Reveal: content dips, the veil wipes upward. */
+.lxi-splash.is-leaving { clip-path: inset(0 0 100% 0); pointer-events: none; }
+.lxi-splash.is-leaving > * {
+  transition: opacity .35s ease, transform .5s var(--lux-ease);
+  opacity: 0 !important;
+  transform: translateY(-6px);
+  animation: none;
+}
+
+@keyframes lxi-rise {
+  from { opacity: 0; transform: translateY(9px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes lxi-breathe {
+  0%, 100% { scale: 1; filter: brightness(1); }
+  50% { scale: 1.04; filter: brightness(1.08); }
+}
+
+/* Cursor dot — never replaces the system cursor. */
+.lxc {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 300;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: rgba(214, 212, 209, .9);
+  box-shadow: 0 0 0 0 rgba(214, 212, 209, 0);
+  mix-blend-mode: difference;
+  opacity: 0;
+  transform: translate3d(-100px, -100px, 0) translate(-50%, -50%);
+  transition: width .35s ease, height .35s ease, background-color .35s ease,
+    box-shadow .35s ease, opacity .35s ease;
+  will-change: transform;
+}
+.lxc.is-on { opacity: 1; }
+.lxc.is-wide {
+  width: 52px;
+  height: 52px;
+  background: rgba(214, 212, 209, .18);
+  box-shadow: 0 0 0 1px rgba(214, 212, 209, .85);
+}
+.lxc.is-hidden { opacity: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .lxi-splash, .lxi-splash > *, .lxc { animation: none !important; transition-duration: .01s !important; }
+  .lxi-splash > * { opacity: 1; }
+}

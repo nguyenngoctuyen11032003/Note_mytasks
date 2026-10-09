@@ -464,13 +464,24 @@ export default async function shoppingPage(root, { query, signal }) {
     try {
       const all = await listShopping();
       const ids = all.filter((i) => i.status === 'purchased' && i.expense_id).sort((a, b) => (b.purchased_on || '').localeCompare(a.purchased_on || '')).slice(0, 500).map((i) => i.expense_id);
-      const exps = ids.length ? await getExpensesByIds(ids).catch(() => []) : [];
       if (!alive) return;
       items = all.map((i) => ({ ...i, unit_price: Number(i.unit_price), total_price: Number(i.total_price), quantity: Number(i.quantity) }));
-      expMap = new Map(exps.map((x) => [x.id, x]));
+      // Show the list now; the linked expenses (amounts actually spent) follow
+      // in a second request and fill in — the page no longer waits for both.
+      const known = ids.filter((id) => expMap.has(id));
+      expMap = new Map(known.map((id) => [id, expMap.get(id)]));
       loaded = true;
       renderStats();
       render();
+      // Always refetch (an edit may have changed an amount); repaint only on a difference.
+      if (ids.length) {
+        const exps = await getExpensesByIds(ids).catch(() => null);
+        if (!alive || !exps) return;
+        const next = new Map(exps.map((x) => [x.id, x]));
+        const same = next.size === expMap.size && [...next].every(([id, x]) => JSON.stringify(expMap.get(id)) === JSON.stringify(x));
+        expMap = next;
+        if (!same) { renderStats(); render(); }
+      }
     } catch (err) {
       if (!alive) return;
       if (!loaded) mount($('[data-stats]'), '');

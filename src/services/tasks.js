@@ -181,6 +181,13 @@ function requireIds(ids) {
   return list;
 }
 
+/** id → title for many tasks in one request (labels only: no join, no description). */
+export async function getTaskTitles(ids) {
+  const list = requireIds(ids);
+  const rows = (await run(db().from('tasks').select('id,title').in('id', list))) || [];
+  return new Map(rows.map((r) => [r.id, r.title]));
+}
+
 /** Apply the same partial patch to many tasks. Returns the updated rows. */
 export async function bulkUpdateTasks(ids, patch) {
   const list = requireIds(ids);

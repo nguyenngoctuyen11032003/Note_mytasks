@@ -62,9 +62,16 @@ export function toPrefixQuery(text) {
  * @param {boolean} [f.trashed=false]
  * @param {number} [f.limit=500]
  */
+/** Everything but `content` (up to 100k chars a row): for counts, titles, pickers. */
+export const NOTE_LIGHT_COLS = NOTE_COLS.replace(' content,', '');
+
+/**
+ * filters.light  → omit `content` (much smaller payload when only titles / dates are used)
+ * filters.recent → order by last edit only (no pinned-first), so `limit` keeps the newest
+ */
 export async function listNotes(filters = {}) {
-  const { search, notebook, tag, kind, pinned, archived = false, trashed = false, limit } = filters || {};
-  let q = db().from('notes').select(NOTE_COLS);
+  const { search, notebook, tag, kind, pinned, archived = false, trashed = false, limit, light = false, recent = false } = filters || {};
+  let q = db().from('notes').select(light ? NOTE_LIGHT_COLS : NOTE_COLS);
   if (trashed) q = q.not('trashed_at', 'is', null);
   else {
     q = q.is('trashed_at', null);
@@ -87,7 +94,8 @@ export async function listNotes(filters = {}) {
   const n = Math.min(Math.max(Number(limit) || 500, 1), 2000);
   q = trashed
     ? q.order('trashed_at', { ascending: false })
-    : q.order('pinned', { ascending: false }).order('updated_at', { ascending: false });
+    : recent ? q.order('updated_at', { ascending: false })
+      : q.order('pinned', { ascending: false }).order('updated_at', { ascending: false });
   // Stable tiebreak + paging: PostgREST returns at most max_rows (1000) per request.
   return fetchPaged(q.order('id', { ascending: true }), n);
 }
@@ -127,10 +135,18 @@ export async function deleteNote(id) {
   return true;
 }
 
+/**
+ * Permanently delete every trashed note. Returns the ids that were removed, so the
+ * caller can release their media (noteMedia.deleteNoteMedia, best effort).
+ */
+export async function emptyTrashIds() {
+  const rows = await run(db().from('notes').delete().not('trashed_at', 'is', null).select('id'));
+  return (rows || []).map((r) => r.id);
+}
+
 /** Permanently delete every trashed note. Returns how many were removed. */
 export async function emptyTrash() {
-  const rows = await run(db().from('notes').delete().not('trashed_at', 'is', null).select('id'));
-  return rows?.length || 0;
+  return (await emptyTrashIds()).length;
 }
 
 /** Notebooks of live (not trashed, not archived) notes → [{name, count}] sorted by name. */

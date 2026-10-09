@@ -23,7 +23,8 @@ import { appBaseUrl } from '../../src/core/config.js';
 
 const NOSESSION = { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false };
 const APP = 'http://localhost:5173/'; // tests/integration/setup.js window.location
-const RESET_URL = `${APP}#/reset-password`;
+const RESET_URL = `${APP}?flow=recovery`; // email templates append &token_hash=…&type=recovery
+const SIGNUP_URL = `${APP}?flow=signup`;
 const DB_URL = process.env.IT_DB_URL || 'postgresql://postgres:postgres@127.0.0.1:54322/postgres';
 
 const users = [];
@@ -184,7 +185,7 @@ describe('auth.requestPasswordReset / resendConfirmation — request shape', () 
     }
   });
 
-  it('requestPasswordReset: redirect_to = <base>#/reset-password, PKCE challenge sent, email normalised', async () => {
+  it('requestPasswordReset: redirect_to = <base>?flow=recovery, PKCE challenge sent, email normalised', async () => {
     const log = [];
     const calls = [];
     const c = pkceClient(recordingFetch(log, (url) => (url.includes('/recover') ? json(200, {}) : undefined)));
@@ -211,10 +212,10 @@ describe('auth.requestPasswordReset / resendConfirmation — request shape', () 
     } finally {
       window.location = saved;
     }
-    expect(log[0].url.searchParams.get('redirect_to')).toBe('https://me.github.io/Note_mytasks/#/reset-password');
+    expect(log[0].url.searchParams.get('redirect_to')).toBe('https://me.github.io/Note_mytasks/?flow=recovery');
   });
 
-  it('resendConfirmation: type signup, redirect_to = app base (no hash route), PKCE challenge', async () => {
+  it('resendConfirmation: type signup, redirect_to = <base>?flow=signup (no hash route), PKCE challenge', async () => {
     const log = [];
     const u = await newUser();
     users.push(u);
@@ -222,20 +223,20 @@ describe('auth.requestPasswordReset / resendConfirmation — request shape', () 
     // Real GoTrue: an already-confirmed address answers 200 without sending mail.
     await expect(auth.resendConfirmation(` ${u.email.toUpperCase()} `)).resolves.toBeDefined();
     const req = log.find((r) => r.url.pathname.endsWith('/auth/v1/resend'));
-    expect(req.url.searchParams.get('redirect_to')).toBe(APP);
+    expect(req.url.searchParams.get('redirect_to')).toBe(SIGNUP_URL);
     expect(req.body).toMatchObject({ email: u.email, type: 'signup', code_challenge_method: 's256' });
     // Unknown address: same answer (no account enumeration).
     await expect(auth.resendConfirmation('nobody-here@example.test')).resolves.toBeDefined();
   });
 
-  it('signUp sends emailRedirectTo = app base too (same confirmation link as resend)', async () => {
+  it('signUp sends emailRedirectTo = <base>?flow=signup too (same confirmation link as resend)', async () => {
     const log = [];
     setClient(pkceClient(recordingFetch(log)));
     const email = `it-signup-${Date.now()}@example.test`;
     const data = await auth.signUp(email, 'Signup-pass-123', '  Tester  ');
     if (data?.user) users.push({ user: data.user });
     const req = log.find((r) => r.url.pathname.endsWith('/auth/v1/signup'));
-    expect(req.url.searchParams.get('redirect_to')).toBe(APP);
+    expect(req.url.searchParams.get('redirect_to')).toBe(SIGNUP_URL);
     expect(req.body.data).toEqual({ display_name: 'Tester' });
   });
 });
@@ -285,7 +286,7 @@ describe('password reset end to end (PKCE + hash router)', () => {
   });
   afterEach(async () => { await pgc?.end(); });
 
-  it('reset request → e-mail link → ?code=…#/reset-password → exchange → PASSWORD_RECOVERY → updatePassword', async () => {
+  it('legacy PKCE link: reset request → ?flow=recovery&code=… → exchange → PASSWORD_RECOVERY → updatePassword', async () => {
     const u = await newUser();
     users.push(u);
     // Browser client; the mail step is the only thing stubbed: GoTrue's 500
@@ -315,9 +316,9 @@ describe('password reset end to end (PKCE + hash router)', () => {
     const res = await fetch(verify, { redirect: 'manual' });
     expect(res.status).toBe(303);
     const landed = new URL(res.headers.get('location'));
-    // PKCE puts the code in the QUERY: the hash route survives intact for the router.
+    // PKCE adds the code to the QUERY next to ?flow=recovery, which main.js reads.
     expect(landed.origin + landed.pathname).toBe(APP);
-    expect(landed.hash).toBe('#/reset-password');
+    expect(landed.searchParams.get('flow')).toBe('recovery'); // main.js routes this to #/reset-password
     const code = landed.searchParams.get('code');
     expect(code).toMatch(/^[0-9a-f-]{36}$/);
 
@@ -348,7 +349,7 @@ describe('password reset end to end (PKCE + hash router)', () => {
     expect(loc.startsWith(`${RESET_URL}#access_token=`)).toBe(true); // redirect URL is allow-listed (not site_url fallback)
   });
 
-  it('recovery via token_hash (verifyOtp) also signs in for updatePassword', async () => {
+  it('token_hash link (email templates) → auth.verifyEmailLink → PASSWORD_RECOVERY → updatePassword', async () => {
     const u = await newUser();
     users.push(u);
     const c = anonClient();
@@ -356,8 +357,8 @@ describe('password reset end to end (PKCE + hash router)', () => {
     const events = [];
     const off = auth.onAuthChange((e) => events.push(e));
     const { data: link } = await admin.auth.admin.generateLink({ type: 'recovery', email: u.email });
-    const { error } = await c.auth.verifyOtp({ token_hash: link.properties.hashed_token, type: 'recovery' });
-    expect(error).toBeNull();
+    const r = await auth.verifyEmailLink(link.properties.hashed_token, 'recovery');
+    expect(r.session.user.id).toBe(u.user.id);
     expect(events).toContain('PASSWORD_RECOVERY');
     off();
     await auth.updatePassword('Otp-recovered-1');

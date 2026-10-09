@@ -41,7 +41,7 @@ export async function signUp(email, password, displayName) {
       password: vPassword(password),
       options: {
         data: name ? { display_name: name } : {}, // read by the handle_new_user trigger
-        emailRedirectTo: appBaseUrl(),
+        emailRedirectTo: `${appBaseUrl()}?flow=signup`,
       },
     }),
   );
@@ -54,7 +54,7 @@ export async function signUp(email, password, displayName) {
 
 /** Re-send the sign-up confirmation link (Supabase rate-limits this server-side). */
 export async function resendConfirmation(email) {
-  return run(db().auth.resend({ type: 'signup', email: vEmail(email), options: { emailRedirectTo: appBaseUrl() } }));
+  return run(db().auth.resend({ type: 'signup', email: vEmail(email), options: { emailRedirectTo: `${appBaseUrl()}?flow=signup` } }));
 }
 
 export async function signOut() {
@@ -71,7 +71,24 @@ export async function signOut() {
 }
 
 export async function requestPasswordReset(email) {
-  return run(db().auth.resetPasswordForEmail(vEmail(email), { redirectTo: `${appBaseUrl()}#/reset-password` }));
+  // ?flow=recovery, not '#/reset-password': the email templates append
+  // '&token_hash=…&type=recovery' to {{ .RedirectTo }}, the legacy PKCE link
+  // appends '&code=…' — both need the query form. main.js reads ?flow so it
+  // can route a PKCE recovery session to the reset page.
+  return run(db().auth.resetPasswordForEmail(vEmail(email), { redirectTo: `${appBaseUrl()}?flow=recovery` }));
+}
+
+/**
+ * Verifies a token_hash email link (supabase/templates/*.html) in this browser.
+ * Unlike the PKCE ?code link it works in any browser/device, and link scanners
+ * that merely open the URL can't burn the token — it is spent only here.
+ * type: 'recovery' | 'email' (sign-up confirmation) | 'email_change'.
+ */
+export async function verifyEmailLink(tokenHash, type) {
+  if (!tokenHash || !['recovery', 'email', 'signup', 'email_change', 'magiclink', 'invite'].includes(type)) {
+    throw new AppError('link_expired');
+  }
+  return run(db().auth.verifyOtp({ token_hash: tokenHash, type }));
 }
 
 export async function updatePassword(password) {

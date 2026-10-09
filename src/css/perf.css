@@ -1,0 +1,78 @@
+/* =====================================================================
+   Performance overrides — loaded LAST (main.js, after the skins) so they win
+   over theme.css, theme-f1.css and theme-zodiac.css.
+
+   Rule of thumb: only transform / opacity animate on the compositor. Blur
+   behind an element (backdrop-filter) is re-rendered on every scroll frame
+   for every element that has it; box-shadow / background-position
+   animations repaint every frame.
+   ===================================================================== */
+
+/* ---------- Phones / touch: glass cards become flat fills ----------
+   The skins put backdrop-filter on every card (.sheet, .stat). Behind a card
+   there is only the fixed ambient gradient, so blurring it changes almost
+   nothing visually — but a page of cards costs a full-screen blur per frame
+   while scrolling on a phone GPU. */
+@media (max-width: 960px), (pointer: coarse) {
+  [data-skin] .sheet,
+  [data-skin] .stat,
+  .glass,
+  .icon-btn.glass {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  /* Notes: many sticky group headers — opaque fill instead of blur. */
+  .nb-group {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: var(--paper);
+  }
+}
+
+/* ---------- Running-timer pulse: compositor-only ----------
+   The original keyframes animate box-shadow (a repaint every frame for as
+   long as a timer runs). Same look with a scaled, fading ring. */
+.timer-chip__pulse { position: relative; }
+.timer-chip__pulse::before { animation: none; box-shadow: none; }
+.timer-chip__pulse::after {
+  content: ''; position: absolute; left: 50%; top: 50%;
+  width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%;
+  background: var(--accent);
+  animation: pulse-ring 1.6s ease-out infinite;
+  will-change: transform, opacity;
+  pointer-events: none;
+}
+@keyframes pulse-ring {
+  0% { transform: scale(1); opacity: 0.6; }
+  70%, 100% { transform: scale(3); opacity: 0; }
+}
+
+/* ---------- Skeleton shimmer: stop when nobody can see it move ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton, .timer-chip__pulse::after { animation: none !important; }
+}
+
+/* ---------- Notes list: skip layout / paint of rows off screen ----------
+   The list is not paginated (up to 500 rows). Rows hold no popovers or
+   positioned children outside their own box (menus are appended to <body>),
+   so the caveat in theme.css about content-visibility does not apply here.
+   The swiping row is exempt so its lifted shadow is not clipped. */
+.nb[data-layout='list'] .nb-item {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 88px;
+}
+.nb[data-layout='list'] .nb-item.is-swiping { content-visibility: visible; }
+
+/* ---------- `transition: all` → only the properties that actually change ----------
+   `all` also transitions width / padding / margin when a class flips, which
+   re-runs layout every frame of the transition. */
+.tick, .tk-qa__icon, .tk-sel span, .tk-status__opt, .md-box {
+  transition-property: background-color, border-color, color, box-shadow, transform, opacity;
+}
+
+/* ---------- Phones: page title entrance without an animated blur ----------
+   skin-speedReveal animates filter: blur() on large display text — a full
+   repaint of the headline every frame on each navigation. Same motion, no blur. */
+@media (max-width: 960px), (pointer: coarse) {
+  [data-skin] .content.is-entering .page-head h1 { animation: skin-fadeSlideUp 0.45s var(--ease) both; }
+}

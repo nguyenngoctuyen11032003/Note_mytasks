@@ -1261,7 +1261,15 @@ export default async function expensesPage(root, { query, signal }) {
   const onSearch = debounce(() => { if (!alive) return; persist(); listLimit = LIST_STEP; renderList(); }, 160);
   disposers.push(on(root, 'input', '[data-f="q"]', (e, el) => { f.q = el.value; onSearch(); }));
   disposers.push(on(root, 'change', 'select[data-f]', (e, el) => { f[el.dataset.f] = el.value; persist(); listLimit = LIST_STEP; renderCats(); renderPayment(); renderList(); }));
-  disposers.push(onDataChanged(() => { if (alive) load({ full: true }); }));
+  // Only kinds this page shows: a task / timer / note change elsewhere must not refetch 180 days of
+  // expenses and rebuild four charts. Bursts are coalesced.
+  let dataTimer = null;
+  disposers.push(() => clearTimeout(dataTimer));
+  disposers.push(onDataChanged((kind) => {
+    if (!alive || ['tasks', 'time', 'activity', 'notes'].includes(kind)) return;
+    clearTimeout(dataTimer);
+    dataTimer = setTimeout(() => { if (alive) load({ full: true }); }, 300);
+  }));
   // Chart colours are read from CSS tokens at draw time → redraw on a theme switch.
   disposers.push(onThemeChange(() => { if (alive && loaded) requestAnimationFrame(() => { if (alive) renderData(); }); }));
   function persist() { setQuery({ q: f.q || null, cat: f.cat || null, pm: f.pm || null }); }

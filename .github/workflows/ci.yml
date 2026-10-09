@@ -51,12 +51,12 @@ jobs:
         with:
           version: 2.120.0
 
-      # Dựng Postgres + Auth + REST local và áp dụng TOÀN BỘ supabase/migrations theo thứ tự.
+      # Dựng Postgres + Auth + REST + Storage local và áp dụng TOÀN BỘ supabase/migrations theo thứ tự.
       # Migration lỗi → job đỏ, không bao giờ tới production.
       # Phải là `supabase start` ngay từ đầu: nếu chạy `db start` trước thì `start` sau đó
       # coi stack là "đã chạy" và không bật Auth/REST/API gateway.
-      - name: Apply migrations on a fresh local stack (Postgres + Auth + REST)
-        run: supabase start -x studio,imgproxy,vector,logflare,edge-runtime,realtime,storage-api,mailpit,postgres-meta,supavisor
+      - name: Apply migrations on a fresh local stack (Postgres + Auth + REST + Storage)
+        run: supabase start -x studio,imgproxy,vector,logflare,edge-runtime,realtime,mailpit,postgres-meta,supavisor
 
       - name: Lint database schema
         run: supabase db lint --fail-on error

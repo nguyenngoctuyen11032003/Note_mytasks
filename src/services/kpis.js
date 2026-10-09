@@ -233,15 +233,22 @@ export function forecastLocal(kpi, records = [], todayDay) {
  * local computation for the rest or when the RPC is unavailable.
  * Returns Map(kpi_id → forecast row).
  */
-export async function forecastAll(kpis, records, todayDay) {
+export async function forecastAll(kpis, records, todayDay, { server: early = null } = {}) {
   const out = new Map();
   let server = [];
   if (kpis.some((k) => k.status === 'active')) {
-    try { server = await progress(null); } catch { server = []; }
+    // `early`: a progress(null) the caller already started alongside its other
+    // requests (it depends on neither), saving one round trip.
+    try { server = (await (early || progress(null))) || []; } catch { server = []; }
   }
   server.forEach((f) => out.set(f.kpi_id, f));
+  const byKpi = new Map();
+  for (const r of records) {
+    const list = byKpi.get(r.kpi_id);
+    if (list) list.push(r); else byKpi.set(r.kpi_id, [r]);
+  }
   for (const k of kpis) {
-    if (!out.has(k.id)) out.set(k.id, forecastLocal(k, records.filter((r) => r.kpi_id === k.id), todayDay));
+    if (!out.has(k.id)) out.set(k.id, forecastLocal(k, byKpi.get(k.id) || [], todayDay));
   }
   return out;
 }

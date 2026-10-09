@@ -7,8 +7,14 @@ import {
 
 Chart.register(BarController, BarElement, LineController, LineElement, PointElement, DoughnutController, ArcElement, CategoryScale, LinearScale, Tooltip, Filler, Legend);
 
+const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+// getComputedStyle returns a live declaration: one object serves every lookup
+// and still reflects theme / skin changes.
+let rootStyle = null;
 export function token(name) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  rootStyle ||= getComputedStyle(document.documentElement);
+  return rootStyle.getPropertyValue(name).trim();
 }
 
 export function palette() {
@@ -90,12 +96,18 @@ export function makeChart(container, { type, data, options }) {
   if (type === 'doughnut' || type === 'pie') {
     data = { ...data, datasets: data.datasets.map((d) => ({ ...d, backgroundColor: Array.isArray(d.backgroundColor) ? d.backgroundColor.map(tone) : tone(d.backgroundColor) })) };
   }
+  // Animate only as part of the page entrance (main.js → .is-entering). A chart
+  // drawn later — data refresh, filter change, replacing one on screen — just
+  // shows the new numbers instead of replaying a grow-from-zero.
+  const redraw = Boolean(container.querySelector('canvas')) || !container.closest('.is-entering');
   container.innerHTML = '';
   const canvas = document.createElement('canvas');
   container.append(canvas);
   const opts = merge(baseOptions(type), options);
   // Printing: draw the final frame immediately so the print snapshot is never mid-animation.
-  if (document.documentElement.dataset.print) opts.animation = false;
+  if (document.documentElement.dataset.print || redraw || REDUCED.matches) opts.animation = false;
+  // Chart.js defaults to 1s: long enough to read as lag on every page open.
+  else if (opts.animation !== false) opts.animation = { duration: 450, ...(opts.animation || {}) };
   const chart = new Chart(canvas, { type, data, options: opts });
   return () => chart.destroy();
 }

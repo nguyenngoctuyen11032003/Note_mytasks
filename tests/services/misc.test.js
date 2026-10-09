@@ -104,11 +104,11 @@ describe('auth', () => {
     expect(fake.calls).toHaveLength(0);
   });
 
-  it('signUp sends display_name and emailRedirectTo = appBaseUrl()', async () => {
+  it('signUp sends display_name and emailRedirectTo = appBaseUrl() + ?flow=signup', async () => {
     fake.respond('auth:signUp', { data: { user: { id: 'u', identities: [{}] }, session: null } });
     await auth.signUp('a@b.co', 'secret12', '  Nam  ');
     expect(fake.last('auth', 'signUp').args[0]).toEqual({
-      email: 'a@b.co', password: 'secret12', options: { data: { display_name: 'Nam' }, emailRedirectTo: 'https://x.github.io/repo/' },
+      email: 'a@b.co', password: 'secret12', options: { data: { display_name: 'Nam' }, emailRedirectTo: 'https://x.github.io/repo/?flow=signup' },
     });
   });
 
@@ -118,9 +118,20 @@ describe('auth', () => {
     await expect(auth.signUp('a@b.co', '123', 'N')).rejects.toMatchObject({ code: 'invalid_input', details: { field: 'password' } });
   });
 
-  it('requestPasswordReset redirects to #/reset-password', async () => {
+  it('requestPasswordReset redirects to the app base with ?flow=recovery (templates append &token_hash)', async () => {
     await auth.requestPasswordReset('a@b.co');
-    expect(fake.last('auth', 'resetPasswordForEmail').args).toEqual(['a@b.co', { redirectTo: 'https://x.github.io/repo/#/reset-password' }]);
+    expect(fake.last('auth', 'resetPasswordForEmail').args).toEqual(['a@b.co', { redirectTo: 'https://x.github.io/repo/?flow=recovery' }]);
+  });
+
+  it('verifyEmailLink spends a token_hash link via verifyOtp; bad input → link_expired', async () => {
+    fake.respond('auth:verifyOtp', { data: { session: { access_token: 't' }, user: { id: 'u' } } });
+    const r = await auth.verifyEmailLink('pkce_abc', 'recovery');
+    expect(fake.last('auth', 'verifyOtp').args[0]).toEqual({ token_hash: 'pkce_abc', type: 'recovery' });
+    expect(r.session.access_token).toBe('t');
+    await expect(auth.verifyEmailLink('', 'recovery')).rejects.toMatchObject({ code: 'link_expired' });
+    await expect(auth.verifyEmailLink('x', 'bogus')).rejects.toMatchObject({ code: 'link_expired' });
+    fake.respond('auth:verifyOtp', { error: { code: 'otp_expired', status: 403, message: 'Email link is invalid or has expired' } });
+    await expect(auth.verifyEmailLink('pkce_old', 'recovery')).rejects.toMatchObject({ code: 'link_expired' });
   });
 
   it('rate limit on reset → rate_limited', async () => {

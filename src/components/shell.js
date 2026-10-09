@@ -58,7 +58,7 @@ export function mountShell(app, { onSignOut, onQuickAdd, onSearch }) {
       <aside class="sidebar" id="sidebar" aria-label="Điều hướng chính">
         <div class="sidebar__top">
           <a class="brand" href="#/dashboard" aria-label="Stratos — Tổng quan">
-            <span class="brand__mark brand__mark--logo" aria-hidden="true"><img src="./icons/logo-mark.png" alt="" width="228" height="256" decoding="async" /></span>
+            <span class="brand__mark brand__mark--logo" aria-hidden="true"><img src="./icons/logo-mark.png?v=stratos2" alt="" width="228" height="256" decoding="async" /></span>
             <span class="brand__text"><span class="brand__name">Stratos</span><span class="brand__sub">Hệ sinh thái cá nhân</span></span>
           </a>
           <button class="icon-btn sidebar__close" type="button" data-act="close-nav" aria-label="Đóng menu">${icon('x')}</button>

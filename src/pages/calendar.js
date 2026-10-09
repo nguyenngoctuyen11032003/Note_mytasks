@@ -9,7 +9,7 @@ import { openTaskForm } from '../components/taskForm.js';
 import { toast } from '../components/toast.js';
 import { setQuery } from '../core/router.js';
 import { onDataChanged, notifyDataChanged, disposeOnAbort } from '../core/events.js';
-import { listTasks, getTask, setTaskStatus, updateTask } from '../services/tasks.js';
+import { listTasks, getTaskTitles, setTaskStatus, updateTask } from '../services/tasks.js';
 import { listEntries, entrySeconds } from '../services/timeEntries.js';
 import { listExpenses } from '../services/expenses.js';
 import {
@@ -66,6 +66,7 @@ export default async function calendarPage(root, { query, signal }) {
   let layers = readLayers();
   let data = { tasks: [], entries: [], expenses: [], from: null, to: null };
   let index = new Map();
+  let taskById = new Map(); // rebuilt with the index: O(1) entry labels
   let loadedKey = '';
   let token = 0;
   let dragId = null;
@@ -111,6 +112,7 @@ export default async function calendarPage(root, { query, signal }) {
   /* ---------------------------------------------------------------- */
 
   function buildIndex() {
+    taskById = new Map(data.tasks.map((t) => [t.id, t]));
     const m = new Map();
     const get = (d) => {
       let v = m.get(d);
@@ -129,12 +131,13 @@ export default async function calendarPage(root, { query, signal }) {
   }
   async function loadTaskNames() {
     const have = new Set(data.tasks.map((t) => t.id));
-    const missing = [...new Set(data.entries.map((e) => e.task_id).filter((id) => id && !have.has(id) && !taskNames.has(id)))].slice(0, 40);
+    const missing = [...new Set(data.entries.map((e) => e.task_id).filter((id) => id && !have.has(id) && !taskNames.has(id)))].slice(0, 400);
     if (!missing.length) return;
-    const got = await Promise.all(missing.map((id) => getTask(id).catch(() => null)));
-    missing.forEach((id, i) => taskNames.set(id, got[i]?.title || ''));
+    // One request for all labels (was one getTask per id).
+    const got = await getTaskTitles(missing).catch(() => new Map());
+    missing.forEach((id) => taskNames.set(id, got.get(id) || ''));
   }
-  const entryLabel = (e) => e.description || data.tasks.find((t) => t.id === e.task_id)?.title || taskNames.get(e.task_id) || 'Phiên làm việc';
+  const entryLabel = (e) => e.description || taskById.get(e.task_id)?.title || taskNames.get(e.task_id) || 'Phiên làm việc';
   const at = (d) => index.get(d) || { tasks: [], entries: [], expenses: [], secs: 0, spend: 0 };
 
   async function load({ force = false } = {}) {

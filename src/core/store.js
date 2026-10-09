@@ -30,6 +30,7 @@ export function clearUserState() {
   set({ session: null, user: null, profile: null, categories: [], runningEntry: null });
   try {
     localStorage.removeItem('nm.pausedSession');
+    localStorage.removeItem('nm.ctx'); // cached profile + categories (main.js)
   } catch {}
 }
 

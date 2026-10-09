@@ -1,0 +1,98 @@
+/* Ink-wash landscape (src/components/auth/inkScene.js).
+   Drawn in currentColor; no background so the page colour shows through. */
+
+.lxi {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--lux-wash, #175a67);
+  contain: layout paint;
+}
+
+.lxi__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.lxi__p { will-change: transform; }
+
+/* Entrance: back ridges first. Hidden only when the .lux root exists. */
+.lux .lxi__l { opacity: 0; }
+.lux.is-revealed .lxi__l {
+  animation: lxi-rise .9s var(--lux-rise, cubic-bezier(.22, 1, .36, 1)) both;
+  animation-delay: calc(var(--i, 0) * 110ms + 80ms);
+}
+@keyframes lxi-rise {
+  from { opacity: 0; transform: translate3d(0, 14px, 0); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Mist drifts slowly side to side. */
+.lxi__mist {
+  animation: lxi-mist var(--lxi-d, 30s) ease-in-out infinite alternate;
+}
+.lxi__p:nth-child(odd) .lxi__mist { animation-direction: alternate-reverse; }
+@keyframes lxi-mist {
+  from { transform: translateX(-30px); }
+  to { transform: translateX(30px); }
+}
+
+/* Reflection shimmer — barely there. */
+.lxi__shim { animation: lxi-shim 7s ease-in-out infinite alternate; }
+@keyframes lxi-shim {
+  from { transform: translateX(-2px); opacity: .86; }
+  to { transform: translateX(2px); opacity: 1; }
+}
+
+/* Cranes: slow drift across the sky, wings flap at the shoulder. */
+.lxi__fly { transform: translate(-200px, 0); }
+.lxi__fly--a { animation: lxi-fly-a 38s linear -9s infinite; }
+.lxi__fly--b { animation: lxi-fly-b 46s linear -27s infinite; }
+@keyframes lxi-fly-a {
+  from { transform: translate(-200px, 0); }
+  50% { transform: translate(760px, -34px); }
+  to { transform: translate(1800px, 6px); }
+}
+@keyframes lxi-fly-b {
+  from { transform: translate(-200px, 10px); }
+  45% { transform: translate(640px, -16px); }
+  to { transform: translate(1800px, -42px); }
+}
+.lxi__wing {
+  transform-origin: 0 0;
+  animation: lxi-flap 1.9s ease-in-out infinite;
+}
+.lxi__wing--far { animation-delay: -.08s; }
+.lxi__fly--b .lxi__wing { animation-duration: 2.2s; }
+@keyframes lxi-flap {
+  0%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(-.55); }
+}
+.lxi__bob { animation: lxi-bob 1.9s ease-in-out infinite; }
+.lxi__fly--b .lxi__bob { animation-duration: 2.2s; }
+@keyframes lxi-bob {
+  0%, 100% { transform: translateY(1.5px); }
+  50% { transform: translateY(-1.5px); }
+}
+
+/* Small screens: drop the brush filter, keep everything else. */
+@media (max-width: 900px), (pointer: coarse) {
+  .lxi__mist { filter: none; }
+  .lxi__p { will-change: auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lxi *,
+  .lux.is-revealed .lxi__l { animation: none !important; }
+  .lux .lxi__l { opacity: 1; }
+  .lxi__fly--a { transform: translate(1010px, -14px); }
+  .lxi__fly--b { transform: translate(1150px, 12px); }
+  .lxi__wing { transform: scaleY(.85); }
+  .lxi__wing--far { transform: scaleY(-.3); }
+}

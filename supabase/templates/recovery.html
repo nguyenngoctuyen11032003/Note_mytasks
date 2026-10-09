@@ -1,0 +1,104 @@
+<!-- Supabase → Authentication → Emails → Templates → "Reset Password"
+     Subject: Stratos · Yêu cầu đặt lại mật khẩu -->
+<!doctype html>
+<html lang="vi" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="x-apple-disable-message-reformatting" />
+  <meta name="color-scheme" content="light" />
+  <meta name="supported-color-schemes" content="light" />
+  <title>Đặt lại mật khẩu của bạn</title>
+</head>
+<body style="margin:0;padding:0;background-color:#efe8df;-webkit-text-size-adjust:100%;">
+  <!-- Preheader: the grey preview line shown in the inbox list -->
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;">Bấm vào liên kết để chọn mật khẩu mới cho tài khoản Stratos của bạn. Liên kết có hiệu lực trong 60 phút.&#8202;&zwnj;&nbsp;&#8202;&zwnj;&nbsp;&#8202;&zwnj;&nbsp;</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#efe8df;">
+    <tr>
+      <td align="center" style="padding:40px 16px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;">
+
+          <!-- Brand band -->
+          <tr>
+            <td style="background-color:#1c120d;border-radius:18px 18px 0 0;padding:28px 40px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td width="40" height="40" align="center" valign="middle" style="width:40px;height:40px;background-color:#4f46e5;border-radius:11px;font-family:Georgia,'Times New Roman',serif;font-size:22px;font-weight:bold;color:#ffffff;line-height:40px;">S</td>
+                  <td style="padding-left:14px;">
+                    <div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:bold;letter-spacing:4px;color:#e2b07a;">STRATOS</div>
+                    <div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;letter-spacing:0.4px;color:#a8968a;padding-top:3px;">Hệ sinh thái cá nhân</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <!-- Caramel hairline -->
+          <tr><td style="height:3px;line-height:3px;font-size:0;background-color:#c8894f;">&nbsp;</td></tr>
+
+          <!-- Heading + intro -->
+          <tr>
+            <td style="background-color:#ffffff;padding:44px 40px 12px 40px;">
+              <div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:bold;letter-spacing:2.5px;text-transform:uppercase;color:#b07440;padding-bottom:12px;">Bảo mật tài khoản</div>
+              <h1 style="margin:0;font-family:Georgia,'Times New Roman',serif;font-size:28px;line-height:1.25;font-weight:normal;color:#1c120d;">Đặt lại mật khẩu của bạn</h1>
+              <p style="margin:20px 0 0 0;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.7;color:#4a3a30;">Xin chào,</p>
+              <p style="margin:10px 0 0 0;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.7;color:#4a3a30;">Chúng tôi vừa nhận được yêu cầu đặt lại mật khẩu cho tài khoản Stratos gắn với địa chỉ <strong style="color:#1c120d;">{{ .Email }}</strong>. Để tiếp tục, vui lòng bấm nút dưới đây và chọn một mật khẩu mới.</p>
+            </td>
+          </tr>
+
+          <!-- Call to action -->
+          <tr>
+            <td style="background-color:#ffffff;padding:24px 40px 8px 40px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td align="center" bgcolor="#1c120d" style="border-radius:999px;">
+                    <a href="{{ .RedirectTo }}&token_hash={{ .TokenHash }}&type=recovery" target="_blank" style="display:inline-block;padding:15px 34px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:bold;letter-spacing:0.3px;color:#ffffff;text-decoration:none;border-radius:999px;">Đặt lại mật khẩu&nbsp;&nbsp;&rarr;</a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Details -->
+          <tr>
+            <td style="background-color:#ffffff;padding:28px 40px 8px 40px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f8f4ef;border:1px solid #ece3d9;border-radius:12px;">
+                <tr>
+                  <td style="padding:16px 12px 8px 20px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#8a7466;width:42%;">Tài khoản</td>
+                  <td style="padding:16px 20px 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;color:#2a1d16;">{{ .Email }}</td>
+                </tr>
+                <tr>
+                  <td style="padding:0px 12px 8px 20px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#8a7466;width:42%;">Hiệu lực liên kết</td>
+                  <td style="padding:0px 20px 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;color:#2a1d16;">60 phút, dùng một lần</td>
+                </tr>
+                <tr>
+                  <td style="padding:0px 12px 16px 20px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#8a7466;width:42%;">Yêu cầu từ</td>
+                  <td style="padding:0px 20px 16px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;color:#2a1d16;">Chức năng “Quên mật khẩu”</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Fallback link + note -->
+          <tr>
+            <td style="background-color:#ffffff;padding:24px 40px 40px 40px;border-radius:0 0 18px 18px;">
+              <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.6;color:#8a7466;">Nếu nút phía trên không hoạt động, hãy sao chép đường dẫn sau vào trình duyệt:</p>
+              <p style="margin:6px 0 0 0;font-family:'Courier New',Courier,monospace;font-size:12px;line-height:1.5;word-break:break-all;"><a href="{{ .RedirectTo }}&token_hash={{ .TokenHash }}&type=recovery" target="_blank" style="color:#b07440;text-decoration:underline;">{{ .RedirectTo }}&token_hash={{ .TokenHash }}&type=recovery</a></p>
+              <p style="margin:24px 0 0 0;padding-top:20px;border-top:1px solid #ece3d9;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.6;color:#8a7466;">Nếu bạn không thực hiện yêu cầu này, bạn có thể yên tâm bỏ qua email — mật khẩu hiện tại vẫn giữ nguyên và tài khoản của bạn vẫn an toàn. Stratos không bao giờ hỏi mật khẩu của bạn qua email.</p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td align="center" style="padding:28px 24px 0 24px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.7;color:#9a8678;">
+              <strong style="color:#6b574a;letter-spacing:2px;">STRATOS</strong><br />
+              Ghi chú · Công việc · Thời gian · Mục tiêu · Chi tiêu<br />
+              Đây là email tự động, vui lòng không trả lời thư này.
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

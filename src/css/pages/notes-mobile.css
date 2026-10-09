@@ -1,0 +1,106 @@
+/* =====================================================================
+   Ghi chú — phone refinements (≤ 720px), on top of notes.css.
+   Quick-filter chips instead of a drawer trip · swipe / long-press rows ·
+   a compact editor bar · a format bar that rides above the keyboard.
+   ===================================================================== */
+
+.nb-chips, .nb-ed__bar .nb-modebtn { display: none; }
+.nb-swipe { display: none; }
+
+@media (max-width: 720px) {
+  /* The top bar already names the page; the list header names the view. */
+  .nb-page .page-head { display: none; }
+  .nb-list__head { padding-top: var(--s-2); }
+
+  /* ---------- Quick-filter chips ---------- */
+  .nb-chips {
+    position: relative;
+    display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none;
+    padding: var(--s-2) var(--s-4) var(--s-3);
+    scroll-padding-inline: var(--s-4);
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+  }
+  .nb-chips::-webkit-scrollbar { display: none; }
+  .nb-chip-f {
+    flex: none; display: inline-flex; align-items: center; gap: 6px;
+    height: 34px; padding: 0 14px; max-width: 60vw;
+    border: 1px solid var(--rule); border-radius: var(--radius-pill); background: var(--surface);
+    font-size: var(--fs-sm); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+  }
+  .nb-chip-f svg { flex: none; width: 14px; height: 14px; color: var(--ink-3); }
+  .nb-chip-f span { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--ink-4); }
+  .nb-chip-f:active { background: var(--surface-2); }
+  .nb-chip-f.is-on { background: var(--ink); border-color: var(--ink); color: var(--surface); font-weight: 500; }
+  .nb-chip-f.is-on svg, .nb-chip-f.is-on span { color: inherit; opacity: 0.75; }
+
+  /* ---------- List rows: press feedback, swipe ---------- */
+  .nb-items { position: relative; }
+  .nb[data-layout='list'] .nb-item {
+    touch-action: pan-y;
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+  }
+  .nb-item:active { background: var(--surface-2); }
+  .nb-item.is-swiping { z-index: 1; background: var(--surface); box-shadow: var(--shadow-2); }
+
+  .nb-swipe {
+    position: absolute; left: 0; right: 0; z-index: 0;
+    display: flex; align-items: center;
+    background: var(--surface-2); color: var(--ink-2);
+    transition: background var(--t-fast), color var(--t-fast);
+  }
+  .nb-swipe__act { display: none; align-items: center; gap: 8px; padding: 0 var(--s-5); font-size: var(--fs-sm); }
+  .nb-swipe__act b { font-weight: 600; }
+  .nb-swipe__act svg { width: 20px; height: 20px; transition: transform var(--t-fast) var(--ease); }
+  .nb-swipe[data-dir='right'] .nb-swipe__act--right { display: inline-flex; }
+  .nb-swipe[data-dir='left'] { justify-content: flex-end; }
+  .nb-swipe[data-dir='left'] .nb-swipe__act--left { display: inline-flex; }
+  .nb-swipe.is-armed { color: #fff; }
+  .nb-swipe.is-armed svg { transform: scale(1.15); }
+  .nb-swipe.is-armed[data-tone='accent'] { background: var(--accent); }
+  .nb-swipe.is-armed[data-tone='ok'] { background: var(--success); }
+  .nb-swipe.is-armed[data-tone='danger'] { background: var(--danger); }
+  .nb-swipe.is-armed[data-tone='info'] { background: var(--info); }
+
+  /* ---------- Editor bar: back · notebook · status ··· view/edit · ⋯ ---------- */
+  .nb-ed__bar .nb-mode,
+  .nb-ed__bar [data-act='color'] { display: none; }
+  .nb-ed__bar .nb-modebtn { display: inline-grid; }
+  .nb-modebtn svg:last-child { display: none; }
+  .nb-editor[data-mode='preview'] .nb-modebtn svg:first-child { display: none; }
+  .nb-editor[data-mode='preview'] .nb-modebtn svg:last-child { display: block; }
+  .nb-editor[data-mode='preview'] .nb-modebtn { color: var(--accent-ink); background: var(--accent-soft); }
+
+  /* ---------- Format bar: most-used tools first, scroll hint on the edge ---------- */
+  .nb-tools {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+  }
+  .nb-tools__sep { display: none; }
+  .nb-tool { order: 20; }
+  .nb-tool[data-tool='task'] { order: 1; }
+  .nb-tool[data-tool='ul'] { order: 2; }
+  .nb-tool[data-tool='bold'] { order: 3; }
+  .nb-tool[data-tool='italic'] { order: 4; }
+  .nb-tool[data-tool='h2'] { order: 5; }
+  .nb-tool[data-tool='image'] { order: 6; }
+  .nb-tool[data-tool='record'] { order: 7; }
+  .nb-tool[data-tool='mark'] { order: 8; }
+  .nb-tool[data-tool='undo'] { order: 9; }
+  .nb-tool[data-tool='redo'] { order: 10; }
+  .nb-tool[data-tool='line-task'] { order: 30; }
+
+  /* ---------- Keyboard open: bar sits on the keyboard, chrome steps aside ---------- */
+  .shell .nb[data-kb] .nb-tools {
+    bottom: var(--nb-kb, 0px);
+    padding-bottom: 6px;
+    transition: none;
+  }
+  .nb[data-kb] .nb-ed__foot { display: none; }
+  html.nb-kb-open .tabbar { visibility: hidden; }
+}
+
+@media (max-width: 720px) and (prefers-reduced-motion: reduce) {
+  .nb-item.is-swiping { transition: none !important; }
+}

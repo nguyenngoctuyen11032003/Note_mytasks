@@ -219,12 +219,23 @@ export default async function tasksPage(root, { query, signal }) {
     if (f.prio && t.priority !== f.prio) return false;
     if (f.tag && !(t.tags || []).some((g) => g.toLocaleLowerCase('vi') === f.tag.toLocaleLowerCase('vi'))) return false;
     if (!dueMatch(t)) return false;
-    const q = normalizeVi(f.q);
-    if (q) {
-      const hay = normalizeVi(`${t.title} ${t.description || ''} ${(t.tags || []).join(' ')}`);
-      if (!q.split(' ').every((w) => hay.includes(w))) return false;
-    }
+    const words = queryWords();
+    if (words.length && !words.every((w) => haystack(t).includes(w))) return false;
     return true;
+  }
+  // Search: normalise the query once per change and each task's text once per
+  // task object (replaceLocal swaps in a new object, so edits re-index) —
+  // instead of 6 × N normalisations of title + description on every render.
+  let qMemo = { q: null, words: [] };
+  function queryWords() {
+    if (qMemo.q !== f.q) { const q = normalizeVi(f.q); qMemo = { q: f.q, words: q ? q.split(' ') : [] }; }
+    return qMemo.words;
+  }
+  const hayMemo = new WeakMap();
+  function haystack(t) {
+    let h = hayMemo.get(t);
+    if (h === undefined) { h = normalizeVi(`${t.title} ${t.description || ''} ${(t.tags || []).join(' ')}`); hayMemo.set(t, h); }
+    return h;
   }
   function sortRows(rows) {
     const by = f.scope === 'done' && f.sort === 'due'
@@ -621,12 +632,13 @@ export default async function tasksPage(root, { query, signal }) {
       animateEl.classList.add('is-completing');
       await wait(620);
     }
-    replaceLocal({ ...t, status, completed_at: status === 'completed' ? new Date().toISOString() : null });
+    const optimistic = { ...t, status, completed_at: status === 'completed' ? new Date().toISOString() : null };
+    replaceLocal(optimistic);
     render();
     try {
       const saved = await req;
       replaceLocal(saved);
-      render();
+      if (differs(optimistic, saved)) render(); // usually identical: skip a second full re-render
       if (status === 'completed') {
         if (runningId() === t.id) timer.stop().catch(() => {});
         if (prev.recurrence) load({ silent: true });
@@ -645,11 +657,13 @@ export default async function tasksPage(root, { query, signal }) {
 
   async function patchTask(t, patch, message) {
     const prev = { ...t };
-    replaceLocal({ ...t, ...patch });
+    const optimistic = { ...t, ...patch };
+    replaceLocal(optimistic);
     render();
     try {
-      replaceLocal(await updateTask(t.id, patch));
-      render();
+      const saved = await updateTask(t.id, patch);
+      replaceLocal(saved);
+      if (differs(optimistic, saved)) render();
       if (message) toast(message, { action: { label: 'Hoàn tác', onClick: () => patchTask(byId(t.id) || t, pickKeys(prev, Object.keys(patch))) } });
     } catch (err) {
       replaceLocal(prev);
@@ -657,6 +671,10 @@ export default async function tasksPage(root, { query, signal }) {
       toast.error(err);
     }
   }
+  // Server echo vs optimistic row: only a visible difference needs a re-render
+  // (timestamps are the server's own and never shown to the second).
+  const NOISE = new Set(['updated_at', 'completed_at', 'created_at']);
+  const differs = (a, b) => !b || Object.keys(b).some((k) => !NOISE.has(k) && JSON.stringify(a[k] ?? null) !== JSON.stringify(b[k] ?? null));
   const pickKeys = (o, keys) => Object.fromEntries(keys.map((k) => [k, o[k] ?? null]));
 
   async function removeTask(t) {
@@ -1192,8 +1210,16 @@ export default async function tasksPage(root, { query, signal }) {
       if (dnd.type === 'mouse') { if (dist > 6) beginDrag(); else return; } else { if (dist > 10) cancelDnd(); return; }
     }
     e.preventDefault();
-    moveGhost(e.clientX, e.clientY);
+    // Pointer events can fire several times per frame: hit-test and measure
+    // (elementFromPoint, getBoundingClientRect) at most once per frame.
+    ghostAt = [e.clientX, e.clientY];
+    ghostRaf ||= requestAnimationFrame(() => {
+      ghostRaf = 0;
+      if (dnd?.ghost) moveGhost(...ghostAt);
+    });
   }
+  let ghostRaf = 0;
+  let ghostAt = null;
   function moveGhost(x, y) {
     dnd.ghost.style.transform = `translate3d(${x - dnd.ox}px, ${y - dnd.oy}px, 0) rotate(1.2deg)`;
     const under = document.elementFromPoint(x, y)?.closest('[data-drop]');

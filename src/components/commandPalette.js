@@ -48,6 +48,23 @@ export function fold(s = '') {
   return String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd');
 }
 
+/**
+ * fold() for search fields, memoised: the corpus (up to 4000 chars per note)
+ * is the same on every keystroke, only the query changes. Bounded so a long
+ * session can't grow it without limit.
+ */
+const FOLDED = new Map();
+function foldHay(s) {
+  const k = String(s);
+  let f = FOLDED.get(k);
+  if (f === undefined) {
+    if (FOLDED.size > 4000) FOLDED.clear();
+    f = fold(k);
+    FOLDED.set(k, f);
+  }
+  return f;
+}
+
 /** Folded string plus a map from folded index → original index (for highlights). */
 function foldMap(s) {
   let out = '';
@@ -78,7 +95,7 @@ function tokenScore(tok, text, subseq = true) {
 export function score(query, ...fields) {
   const toks = fold(query).trim().split(/\s+/).filter(Boolean);
   if (!toks.length) return 1;
-  const hay = fields.filter(Boolean).map(fold);
+  const hay = fields.filter(Boolean).map(foldHay);
   let total = 0;
   for (const t of toks) {
     let best = 0;
@@ -192,6 +209,14 @@ const expenseItem = (e) => ({
   href: `#/expenses?period=day&date=${encodeURIComponent(e.spent_on || '')}&focus=${encodeURIComponent(e.id)}`,
 });
 
+/** Row → palette item, built once per row object (excerpt() runs regexes over the whole note). */
+const ITEMS = new WeakMap();
+const asItem = (build) => (row) => {
+  let it = ITEMS.get(row);
+  if (!it) { it = build(row); ITEMS.set(row, it); }
+  return it;
+};
+
 /* ------------------------------------------------------------------ */
 /* Recent                                                               */
 
@@ -291,9 +316,9 @@ export function openPalette(initial = '') {
       .sort((a, b) => b.s - a.s);
     const cmds = rank(commands, (c) => [c.label, c.keywords, c.sub]);
     const data = [
-      ['Công việc', rank(live.tasks.map(taskItem), (i) => [i.label, i.search])],
-      ['Ghi chú', rank(live.notes.map(noteItem), (i) => [i.label, i.search])],
-      ['Chi tiêu', rank(live.expenses.map(expenseItem), (i) => [i.label, i.search, i.sub])],
+      ['Công việc', rank(live.tasks.map(asItem(taskItem)), (i) => [i.label, i.search])],
+      ['Ghi chú', rank(live.notes.map(asItem(noteItem)), (i) => [i.label, i.search])],
+      ['Chi tiêu', rank(live.expenses.map(asItem(expenseItem)), (i) => [i.label, i.search, i.sub])],
     ];
     const cmdGroups = ['Hành động', 'Đi tới'].map((g) => [g, cmds.filter((x) => x.it.group === g)]);
     // Order groups by their best hit; ties keep the declared order.
