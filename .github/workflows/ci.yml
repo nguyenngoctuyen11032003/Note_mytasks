@@ -1,0 +1,61 @@
+# Kiểm tra mọi Pull Request (và được deploy.yml gọi lại trước khi deploy).
+# Không cần secret: web build dùng biến public, database chạy Supabase local bằng Docker.
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  web:
+    name: Web build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Chặn secret lọt vào biến VITE_*
+        run: node .github/scripts/check-public-env.mjs
+
+      - run: npm run build
+
+  database:
+    name: Database migrations (local)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: supabase/setup-cli@v3
+        with:
+          version: 2.120.0
+
+      # Dựng Postgres + Auth local và áp dụng TOÀN BỘ supabase/migrations theo thứ tự.
+      # Migration lỗi → job đỏ, không bao giờ tới production.
+      - name: Apply migrations on a fresh local database
+        run: supabase db start
+
+      - name: Lint database schema
+        run: supabase db lint --fail-on error
+
+      - name: Stop local database
+        if: always()
+        run: supabase stop --no-backup

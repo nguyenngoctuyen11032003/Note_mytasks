@@ -1,0 +1,148 @@
+/* =====================================================================
+   Design tokens — "Atelier" system
+   Warm hand-made paper, iron-gall ink, a single terracotta accent and
+   architectural hairlines. Every colour in the app comes from here.
+   ===================================================================== */
+
+:root {
+  /* Type */
+  --font-display: 'Fraunces', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+  --font-sans: 'Be Vietnam Pro', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+
+  --fs-2xs: 0.6875rem;  /* 11 */
+  --fs-xs: 0.75rem;     /* 12 */
+  --fs-sm: 0.8125rem;   /* 13 */
+  --fs-md: 0.9375rem;   /* 15 */
+  --fs-lg: 1.0625rem;   /* 17 */
+  --fs-xl: 1.375rem;    /* 22 */
+  --fs-2xl: 1.875rem;   /* 30 */
+  --fs-3xl: 2.625rem;   /* 42 */
+  --fs-4xl: 3.5rem;     /* 56 */
+
+  /* Space — 4px module */
+  --s-1: 4px;  --s-2: 8px;  --s-3: 12px; --s-4: 16px; --s-5: 20px;
+  --s-6: 24px; --s-7: 32px; --s-8: 40px; --s-9: 56px; --s-10: 72px;
+
+  --radius-xs: 3px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  --sidebar-w: 248px;
+  --topbar-h: 64px;
+  --content-max: 1320px;
+
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --t-fast: 140ms;
+  --t-med: 240ms;
+  --t-slow: 420ms;
+
+  /* ---------- Light: paper & ink ---------- */
+  --paper: #f3ede2;          /* page */
+  --paper-2: #ece5d7;        /* recessed */
+  --surface: #fbf8f2;        /* sheets / cards */
+  --surface-2: #f6f1e7;
+  --surface-sunk: #e7dfcf;
+  --ink: #1f1b16;
+  --ink-2: #4a433a;
+  --ink-3: #7a7062;
+  --ink-4: #a69c8c;
+  --rule: #d8cebc;           /* hairlines */
+  --rule-strong: #bfb39e;
+  --grid-line: rgba(31, 27, 22, 0.045);
+
+  --accent: #b4532a;         /* terracotta */
+  --accent-ink: #8f3d1b;
+  --accent-soft: #f1dccd;
+  --accent-contrast: #fff8f1;
+
+  --moss: #56693a;   --moss-soft: #e0e5cf;
+  --ochre: #b7862a;  --ochre-soft: #f1e3c3;
+  --indigo: #3e5a86; --indigo-soft: #dbe2ee;
+  --clay: #a8473f;   --clay-soft: #f1d6d1;
+  --plum: #6e4f7c;   --plum-soft: #e6dcea;
+
+  --success: var(--moss);   --success-soft: var(--moss-soft);
+  --warning: var(--ochre);  --warning-soft: var(--ochre-soft);
+  --danger: var(--clay);    --danger-soft: var(--clay-soft);
+  --info: var(--indigo);    --info-soft: var(--indigo-soft);
+
+  --shadow-1: 0 1px 0 rgba(31, 27, 22, 0.04), 0 1px 2px rgba(31, 27, 22, 0.05);
+  --shadow-2: 0 1px 0 rgba(31, 27, 22, 0.04), 0 8px 24px -12px rgba(31, 27, 22, 0.22);
+  --shadow-3: 0 24px 60px -20px rgba(31, 27, 22, 0.35), 0 2px 6px rgba(31, 27, 22, 0.08);
+  --focus: 0 0 0 2px var(--surface), 0 0 0 4px color-mix(in srgb, var(--accent) 70%, transparent);
+
+  --paper-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.12 0 0 0 0 0.1 0 0 0 0 0.08 0 0 0 .055 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+
+  color-scheme: light;
+}
+
+/* ---------- Dark: graphite drafting table ---------- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --paper: #151310;
+    --paper-2: #1b1814;
+    --surface: #1e1b17;
+    --surface-2: #23201b;
+    --surface-sunk: #12100d;
+    --ink: #efe8db;
+    --ink-2: #cbc1b1;
+    --ink-3: #978d7d;
+    --ink-4: #6b6255;
+    --rule: #34302a;
+    --rule-strong: #4a443b;
+    --grid-line: rgba(239, 232, 219, 0.035);
+
+    --accent: #e07a4d;
+    --accent-ink: #f0a07c;
+    --accent-soft: #3a2419;
+    --accent-contrast: #1a0f09;
+
+    --moss: #9db574;   --moss-soft: #263020;
+    --ochre: #e0b358;  --ochre-soft: #352a15;
+    --indigo: #8ea9d6; --indigo-soft: #1f2836;
+    --clay: #e58a80;   --clay-soft: #3a1f1c;
+    --plum: #c0a0cf;   --plum-soft: #2e2433;
+
+    --shadow-1: 0 1px 0 rgba(0, 0, 0, 0.3);
+    --shadow-2: 0 10px 30px -12px rgba(0, 0, 0, 0.6);
+    --shadow-3: 0 30px 70px -20px rgba(0, 0, 0, 0.75);
+    --paper-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .03 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --paper: #151310;
+  --paper-2: #1b1814;
+  --surface: #1e1b17;
+  --surface-2: #23201b;
+  --surface-sunk: #12100d;
+  --ink: #efe8db;
+  --ink-2: #cbc1b1;
+  --ink-3: #978d7d;
+  --ink-4: #6b6255;
+  --rule: #34302a;
+  --rule-strong: #4a443b;
+  --grid-line: rgba(239, 232, 219, 0.035);
+
+  --accent: #e07a4d;
+  --accent-ink: #f0a07c;
+  --accent-soft: #3a2419;
+  --accent-contrast: #1a0f09;
+
+  --moss: #9db574;   --moss-soft: #263020;
+  --ochre: #e0b358;  --ochre-soft: #352a15;
+  --indigo: #8ea9d6; --indigo-soft: #1f2836;
+  --clay: #e58a80;   --clay-soft: #3a1f1c;
+  --plum: #c0a0cf;   --plum-soft: #2e2433;
+
+  --shadow-1: 0 1px 0 rgba(0, 0, 0, 0.3);
+  --shadow-2: 0 10px 30px -12px rgba(0, 0, 0, 0.6);
+  --shadow-3: 0 30px 70px -20px rgba(0, 0, 0, 0.75);
+  --paper-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .03 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  color-scheme: dark;
+}

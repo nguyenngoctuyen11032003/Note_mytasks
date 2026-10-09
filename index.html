@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f3ede2" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#151310" media="(prefers-color-scheme: dark)" />
+    <meta name="description" content="Note_mytasks — sổ tay quản lý công việc, thời gian, KPI và chi tiêu cá nhân." />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@300;400;500;600;700&family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..600&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+    <title>Note_mytasks</title>
+    <script>
+      // Apply the stored theme before first paint to avoid a flash.
+      try {
+        var t = localStorage.getItem('nm.theme');
+        if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="app">
+      <div class="boot">
+        <span class="boot__mark">N</span>
+        <span class="boot__line"></span>
+      </div>
+    </div>
+    <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
