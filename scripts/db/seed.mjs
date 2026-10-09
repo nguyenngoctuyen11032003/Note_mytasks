@@ -87,6 +87,15 @@ try {
        (select count(*) from public.activity_logs  t where t.user_id = u.id) as activity_logs
      from auth.users u where lower(u.email) = $1`, [email]);
 
+  const { rows: [{ has_notes: hasNotes }] } = await client.query(
+    `select to_regclass('public.notes') is not null as has_notes`);
+  if (hasNotes) {
+    const { rows: [n] } = await client.query(
+      `select count(*) as notes from public.notes t join auth.users u on u.id = t.user_id where lower(u.email) = $1`,
+      [email]);
+    c.notes = n.notes;
+  }
+
   await client.query('commit');
   console.log('\nSeeded rows:');
   console.table(c);
