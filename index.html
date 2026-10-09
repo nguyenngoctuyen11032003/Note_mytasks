@@ -4,15 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" content="#f3ede2" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#151310" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#180a06" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#180a06" media="(prefers-color-scheme: dark)" />
     <meta name="description" content="Note_mytasks — sổ tay quản lý công việc, thời gian, KPI và chi tiêu cá nhân." />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <meta name="application-name" content="Note_mytasks" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Note_mytasks" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="format-detection" content="telephone=no" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@300;400;500;600;700&family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..600&family=JetBrains+Mono:wght@400;500&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&family=Inter+Tight:wght@500..700&display=swap"
     />
     <title>Note_mytasks</title>
     <script>
@@ -20,6 +29,8 @@
       try {
         var t = localStorage.getItem('nm.theme');
         if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+        // Desktop sidebar collapsed to an icon rail (shell.js) — also before paint.
+        if (localStorage.getItem('nm.sidebar') === 'rail') document.documentElement.dataset.sidebar = 'rail';
       } catch (e) {}
     </script>
   </head>

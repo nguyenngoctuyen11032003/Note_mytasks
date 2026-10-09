@@ -141,6 +141,9 @@ begin
   delete from public.kpis           where user_id = v_uid;   -- cascades kpi_records
   delete from public.tasks          where user_id = v_uid;
   delete from public.activity_logs  where user_id = v_uid;
+  if to_regclass('public.notes') is not null then           -- notes arrive with migration 000700
+    delete from public.notes where user_id = v_uid;
+  end if;
   delete from public.categories     where user_id = v_uid and not is_default;
   perform public.seed_default_categories(v_uid);
 
@@ -632,6 +635,60 @@ begin
   insert into public.kpi_records (user_id, kpi_id, recorded_on, value, created_at, updated_at) values
     (v_uid, v_kpi, v_m3 + 20, 14, pg_temp.ts(v_m3 + 20, '22:00'), pg_temp.ts(v_m3 + 20, '22:00')),
     (v_uid, v_kpi, v_m2 + 20, 23, pg_temp.ts(v_m2 + 20, '22:00'), pg_temp.ts(v_m2 + 20, '22:00'));
+
+
+  -- =================================================================
+  -- 6½. NOTES (only when migration 000700 is applied)
+  --     task-linked notes point at the seeded tasks by title.
+  -- =================================================================
+  if to_regclass('public.notes') is not null then
+    insert into public.notes (user_id, title, content, notebook, tags, color, pinned, archived, trashed_at,
+                              task_id, kind, created_at, updated_at)
+    select v_uid, n.title, n.content, n.notebook, n.tags, n.color, n.pinned, n.archived,
+           case when n.trashed then pg_temp.ts(v_today + n.upd, '22:10') end,
+           (select t.id from public.tasks t where t.user_id = v_uid and t.title = n.task_title),
+           n.kind,
+           pg_temp.ts(v_today + n.cr, n.at),
+           least(pg_temp.ts(v_today + n.upd, n.at) + interval '25 minutes', now() - interval '5 minutes')
+      from (values
+        ('Mục tiêu quý IV',
+         E'## OKR cá nhân Q4\n\n1. Hoàn thành refactor xác thực (JWT + refresh token) trước giữa tháng 11\n2. Thi IELTS thử, mục tiêu Speaking 6.5\n3. Half Marathon tháng 11 – dưới 2h15\n4. Quỹ dự phòng đạt 90 triệu\n\n> Mỗi tối Chủ nhật review lại tiến độ trên trang KPI.',
+         'Cá nhân', '{okr,muc-tieu}'::text[], '#D4A72C', true, false, false, null::text, 'note', -9, -1, time '21:40'),
+        ('Họp kế hoạch Sprint 19',
+         E'**Thành phần:** PO, 4 dev, 1 QA\n\n### Quyết định\n- Ưu tiên migrate service thông báo sang RabbitMQ\n- Tạm hoãn cảnh báo Grafana, chuyển sang dự án observability\n\n### Action items\n- [x] Minh Anh: thiết kế consumer idempotent\n- [x] Huy: cập nhật tài liệu luồng gửi email\n- [ ] QA: kịch bản test retry khi broker down',
+         'Công việc', '{sprint,meeting}', '#3B82C4', false, false, false, 'Họp kế hoạch Sprint 19 với team Product', 'meeting', -21, -21, time '10:30'),
+        ('Ghi chú điều tra memory leak worker ảnh',
+         E'- RSS tăng ~200MB/giờ khi tỉ lệ lỗi > 5%\n- Heap snapshot: `Buffer` từ sharp giữ lại trong closure của retry handler\n- Fix: gọi `image.destroy()` trong `finally`, giới hạn concurrency = 4\n- Sau fix: RSS ổn định quanh 310MB sau 6 giờ chạy',
+         'Công việc', '{bugfix,nodejs,performance}', null, false, false, false, 'Điều tra memory leak trên worker xử lý ảnh', 'note', -6, -4, time '16:20'),
+        ('Checklist deploy staging',
+         E'- [x] Tạo GitHub Environment `staging` + required reviewer\n- [x] Secret: registry token, kubeconfig\n- [ ] Bước migrate DB chạy trước khi rollout\n- [ ] Smoke test sau deploy (health, login, tạo đơn)\n- [ ] Thông báo kênh #release khi xong',
+         'Công việc', '{devops,ci}', '#2FA4A9', true, false, false, 'Triển khai CI/CD cho môi trường staging', 'checklist', -5, -1, time '15:00'),
+        ('Tối ưu PostgreSQL – dàn ý bài blog',
+         E'1. Đo trước: `EXPLAIN (ANALYZE, BUFFERS)`\n2. Composite index đúng thứ tự cột theo điều kiện lọc\n3. Keyset pagination thay OFFSET\n4. Kết quả: P95 1,8s → 120ms\n5. Bài học: đừng tối ưu khi chưa có số liệu',
+         'Học tập', '{blog,database}', null, false, false, false, 'Viết blog: Kinh nghiệm tối ưu PostgreSQL', 'note', -6, -2, time '22:00'),
+        ('AWS SAA – những chỗ hay nhầm',
+         E'- S3 Glacier Instant vs Flexible Retrieval: khác thời gian lấy dữ liệu\n- NAT Gateway là theo AZ, cần 1 cái mỗi AZ để HA\n- SQS FIFO: tối đa 300 msg/s (3.000 khi batching)\n- Aurora Global Database: RPO ~1s, RTO < 1 phút',
+         'Học tập', '{aws,certificate}', '#4F9D5D', false, true, false, 'Ôn luyện đề AWS Solutions Architect – Associate', 'note', -35, -19, time '21:15'),
+        ('IELTS Speaking Part 2 – Describe a project you worked on',
+         E'**Ý chính:** dự án tối ưu hệ thống đơn hàng\n- Bối cảnh: khách hàng phàn nàn trang chậm\n- Vai trò: phân tích truy vấn, đề xuất index\n- Kết quả: nhanh hơn 15 lần, được team ghi nhận\n\nTừ vựng: *bottleneck, trade-off, scalable, stakeholder*',
+         'Học tập', '{english,ielts}', null, false, false, false, 'Luyện IELTS Speaking – Part 2 chủ đề công việc', 'note', -8, -3, time '21:30'),
+        ('Nhật ký tuần',
+         E'Tuần này khá bận nhưng hiệu quả: xong điều tra memory leak, bắt đầu CI/CD staging. Chạy được 21 km cả tuần. Cần ngủ sớm hơn – 3 hôm liền thức sau 0h vì làm side project.',
+         'Cá nhân', '{journal}', '#7C6BC4', false, false, false, null, 'journal', -3, -3, time '22:30'),
+        ('Lịch tập Half Marathon',
+         E'| Thứ | Bài tập |\n|---|---|\n| 3 | Interval 6 × 800m |\n| 5 | Tempo 8 km |\n| 7 | Long run 14–18 km |\n| CN | Yoga phục hồi |\n\nGiảm tải tuần cuối trước giải.',
+         'Cá nhân', '{running,health}', '#D9534F', false, false, false, null, 'note', -40, -12, time '06:45'),
+        ('Kế hoạch Đà Lạt cuối năm',
+         E'- Thời gian: 3N2Đ, đi xe giường nằm\n- Ngân sách: ~6 triệu/người\n- Chỗ ở: homestay khu Trại Mát\n- [ ] Chốt danh sách người đi\n- [ ] Đặt xe trước 2 tuần',
+         'Cá nhân', '{travel}', null, false, false, false, 'Lên kế hoạch du lịch Đà Lạt cuối năm', 'checklist', -7, -6, time '20:50'),
+        ('Ý tưởng side project',
+         E'- Tự động phân loại chi tiêu theo mô tả\n- Nhắc khi một danh mục vượt 80% ngân sách\n- Xuất báo cáo tháng ra PDF',
+         'Dự án phụ', '{side-project,idea}', '#0E9F6E', false, false, false, null, 'note', -30, -11, time '23:00'),
+        ('Nháp cũ – danh sách mua sắm tháng 8',
+         E'Đã chuyển sang trang Mua sắm.',
+         null, '{}', null, false, false, true, null, 'note', -60, -20, time '20:00')
+      ) as n(title, content, notebook, tags, color, pinned, archived, trashed, task_title, kind, cr, upd, at);
+  end if;
 
 
   -- =================================================================

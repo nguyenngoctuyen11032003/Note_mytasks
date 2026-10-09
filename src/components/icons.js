@@ -54,10 +54,29 @@ const P = {
   piggy: '<path d="M19 11c0-3.3-3.1-6-7-6S5 7.7 5 11c0 1.8.9 3.4 2.3 4.5V19h3v-2h3.4v2h3v-3.5A5.8 5.8 0 0 0 19 11z"/><path d="M19 10.5h1.5M15.5 9.5v.5"/>',
   grip: '<circle cx="9" cy="6" r="1" fill="currentColor"/><circle cx="15" cy="6" r="1" fill="currentColor"/><circle cx="9" cy="12" r="1" fill="currentColor"/><circle cx="15" cy="12" r="1" fill="currentColor"/><circle cx="9" cy="18" r="1" fill="currentColor"/><circle cx="15" cy="18" r="1" fill="currentColor"/>',
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+  repeat: '<path d="M17 2.5 20.5 6 17 9.5"/><path d="M3.5 11.5V10a4 4 0 0 1 4-4h13M7 21.5 3.5 18 7 14.5"/><path d="M20.5 12.5V14a4 4 0 0 1-4 4h-13"/>',
+  checkSquare: '<rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="m8 12.5 3 3 5-6"/>',
+  keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h1M10 10h1M13.5 10h1M17 10h.5M6.5 14h1M10 14h4.5M17 14h.5"/>',
+  copy: '<rect x="8.5" y="8.5" width="12" height="12" rx="2"/><path d="M15.5 8.5V5.5a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h3"/>',
+  layers: '<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>',
   arrowRight: '<path d="M5 12h14M13 6l6 6-6 6"/>',
   filter: '<path d="M4 5h16l-6 7.5V19l-4 2v-8.5z"/>',
   activity: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+  note: '<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 11h7M9 15h7M9 19h4"/>',
+  pin: '<path d="M9 3h6l-1 6 4 4H6l4-4z"/><path d="M12 13v8"/>',
+  archive: '<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v12h14V8M10 12h4"/>',
   coin: '<ellipse cx="12" cy="7" rx="7" ry="3"/><path d="M5 7v5c0 1.7 3.1 3 7 3s7-1.3 7-3V7M5 12v5c0 1.7 3.1 3 7 3s7-1.3 7-3v-5"/>',
+  expand: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+  skip: '<path d="M5 5.5v13l9-6.5z" fill="currentColor" stroke="none"/><path d="M18 5v14"/>',
+  coffee: '<path d="M4 9h13v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z"/><path d="M17 10.5h1.5a2.5 2.5 0 0 1 0 5H17M8 3.5v2.5M12 3.5v2.5"/>',
+  bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
+  printer: '<path d="M7 8V3.5h10V8"/><rect x="3" y="8" width="18" height="9" rx="2"/><path d="M7 14h10v6.5H7z"/><path d="M17 11h.5"/>',
+  upload: '<path d="M12 16V5M7 9.5l5-5 5 5M4 20h16"/>',
+  phone: '<rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M11 18.5h2"/>',
+  database: '<ellipse cx="12" cy="5.5" rx="7.5" ry="2.8"/><path d="M4.5 5.5v13c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8v-13M4.5 12c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8"/>',
+  shield: '<path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.2 7.5 9.5 4.3-1.3 7.5-4.9 7.5-9.5V6z"/><path d="m9 12 2 2 4-4.5"/>',
+  arrowUp: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  arrowDown: '<path d="M12 5v14M6 13l6 6 6-6"/>',
 };
 
 export function icon(name, cls = '') {
@@ -77,6 +96,7 @@ const ART = {
   cart: `<path d="M14 18h12l9 44h52l9-32H30"/><circle cx="44" cy="76" r="5"/><circle cx="80" cy="76" r="5"/><path d="M46 40h36M50 50h28" stroke="var(--accent)"/>`,
   chart: `<path d="M18 10v70h88"/><rect x="30" y="50" width="12" height="30"/><rect x="50" y="34" width="12" height="46"/><rect x="70" y="42" width="12" height="38"/><rect x="90" y="22" width="12" height="58" stroke="var(--accent)"/>`,
   activity: `<path d="M10 50h22l10-28 16 52 12-36 8 12h32"/><circle cx="58" cy="74" r="2" fill="var(--accent)" stroke="var(--accent)"/>`,
+  note: `<path d="M30 8h46l16 16v58H30z"/><path d="M76 8v16h16"/><path d="M40 36h40M40 46h40M40 56h28"/><path d="m40 68 3 3 6-6" stroke="var(--accent)"/><path d="M54 68h18" stroke="var(--accent)"/><path d="M14 86h92" stroke-dasharray="2 4"/>`,
 };
 
 export function art(name) {

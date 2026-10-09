@@ -4,7 +4,7 @@ import { icon } from '../components/icons.js';
 import { field, input } from '../components/modal.js';
 import { toast } from '../components/toast.js';
 import { navigate, href } from '../core/router.js';
-import { signIn, signUp, requestPasswordReset, updatePassword } from '../services/auth.js';
+import { signIn, signUp, requestPasswordReset, updatePassword, resendConfirmation } from '../services/auth.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
@@ -83,7 +83,8 @@ export default function renderAuth(app, { kind, query }) {
     try {
       await submit(kind, v, notice, form);
     } catch (err) {
-      showNotice(notice, 'danger', err.message);
+      if (err.code === 'email_not_confirmed') showResend(notice, v.email);
+      else showNotice(notice, 'danger', err.message);
     } finally {
       setBusy(btn, false);
     }
@@ -186,6 +187,23 @@ async function submit(kind, v, notice, form) {
     toast('Đã đổi mật khẩu.');
     navigate('/dashboard', null, { replace: true });
   }
+}
+
+// Login blocked by an unconfirmed e-mail: offer to send the link again.
+function showResend(notice, email) {
+  showNotice(notice, 'danger', html`Email chưa được xác nhận. Hãy kiểm tra hộp thư (cả Spam / Quảng cáo) của <strong>${email}</strong>.
+    <div style="margin-top:var(--s-3)"><button type="button" class="btn btn--sm" data-resend>Gửi lại email xác nhận</button></div>`);
+  const btn = notice.querySelector('[data-resend]');
+  btn.addEventListener('click', async () => {
+    setBusy(btn, true);
+    try {
+      await resendConfirmation(email);
+      showNotice(notice, 'success', html`Đã gửi lại liên kết xác nhận tới <strong>${email}</strong>. Thư có thể mất vài phút — nhớ xem cả thư mục Spam.`);
+    } catch (err) {
+      showNotice(notice, 'danger', err.message);
+      setBusy(btn, false);
+    }
+  });
 }
 
 function showNotice(el, type, msg) {

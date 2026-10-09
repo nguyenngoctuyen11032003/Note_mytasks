@@ -210,3 +210,28 @@ export function suggestCategory(description, { history = [], categories = [], li
     (order.get(a.category_id) ?? 1e9) - (order.get(b.category_id) ?? 1e9));
   return out.slice(0, limit);
 }
+
+/**
+ * Order category ids by how often AND how recently they were used — for the
+ * "recent category" chips. Each use weighs 0.5^(age / halfLife) (age in rows,
+ * newest first), so yesterday's coffee beats last quarter's rent.
+ * @param {Array<{category_id}>} history newest first
+ * @returns {string[]} category ids, most relevant first (only used ones)
+ */
+export function rankCategories(history = [], { halfLife = 25 } = {}) {
+  const score = new Map();
+  (history || []).forEach((h, i) => {
+    if (!h || h.category_id == null) return;
+    score.set(h.category_id, (score.get(h.category_id) || 0) + 0.5 ** (i / halfLife));
+  });
+  return [...score.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
+}
+
+/** Most used payment method in a recent history (newest first), or null. */
+export function topPaymentMethod(history = [], { take = 40 } = {}) {
+  const c = new Map();
+  for (const h of (history || []).slice(0, take)) if (h?.payment_method) c.set(h.payment_method, (c.get(h.payment_method) || 0) + 1);
+  let best = null, n = 0;
+  for (const [k, v] of c) if (v > n) { best = k; n = v; }
+  return best;
+}

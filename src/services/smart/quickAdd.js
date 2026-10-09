@@ -33,6 +33,14 @@
 // - Recurrence: mỗi/hằng/hàng ngày → daily; ngày thường / các ngày trong tuần / thứ 2-thứ 6
 //   → weekdays; mỗi/hằng/hàng tuần → weekly; mỗi/hằng/hàng tháng → monthly;
 //   "mỗi thứ 3" → weekly + due on the next Tuesday (today allowed).
+// - Explicit estimate "~30p" / "~2h" / "~1g30" always wins over bare durations; a bare
+//   hour right after a date word ("mai 9h", "thứ 6 14h", "12/10 9h") is a time of day.
+// - Time of day ("lúc 9h", "9h30 sáng", "14:00", "mai 9h", "3h chiều") is reported as
+//   due_time 'HH:MM' (key present only when found) and KEPT in the title — tasks have
+//   no time column, so the title is where the hour stays visible.
+// - "!1".."!4" = urgent..low (Todoist order). "ngày làm việc" → weekdays.
+// - "#x" equal to a task category name (accent/space-insensitive) also sets category_id
+//   when no "@category" was given; it stays a tag too.
 // - Title: original text minus recognised tokens, whitespace collapsed, casing/diacritics
 //   kept. Never empty: falls back to the original text.
 
@@ -182,6 +190,7 @@ const RECURRENCE_RULES = [
     re: `${B}(?:(?:vao\\s+)?(?:(?:moi|hang)\\s+)?(?:cac\\s+)?ngay\\s+thuong|cac\\s+ngay\\s+trong\\s+tuan|(?:tu\\s+)?thu\\s*2\\s*(?:-|den|toi)\\s*thu\\s*6|weekdays?)${E}`,
     value: 'weekdays',
   },
+  { re: `${B}(?:(?:vao\\s+)?(?:(?:moi|hang|cac)\\s+)?ngay\\s+lam\\s+viec|workdays?)${E}`, value: 'weekdays' },
   { re: `${B}(?:(?:moi|hang)\\s+ngay|daily|every\\s*day)${E}`, value: 'daily' },
   { re: `${B}(?:(?:moi|hang)\\s+tuan|weekly|every\\s*week)${E}`, value: 'weekly' },
   { re: `${B}(?:(?:moi|hang)\\s+thang|monthly|every\\s*month)${E}`, value: 'monthly' },
@@ -213,7 +222,8 @@ const PRIORITY_WORDS = {
   tb: 'medium', 'trung binh': 'medium', trungbinh: 'medium', medium: 'medium', med: 'medium', vua: 'medium',
   thap: 'low', low: 'low',
 };
-const PRIORITY_RE = `(?<![\\p{L}\\p{N}!])(!{1,3})(khan\\s+cap|khancap|trung\\s+binh|trungbinh|gap|khan|urgent|cao|high|tb|medium|med|vua|thap|low)?(?![\\p{L}\\p{N}!])`;
+const PRIORITY_DIGIT = { 1: 'urgent', 2: 'high', 3: 'medium', 4: 'low' };
+const PRIORITY_RE = `(?<![\\p{L}\\p{N}!])(!{1,3})([1-4]|khan\\s+cap|khancap|trung\\s+binh|trungbinh|gap|khan|urgent|cao|high|tb|medium|med|vua|thap|low)?(?![\\p{L}\\p{N}!])`;
 
 function parsePriority(sc) {
   let best = null;
@@ -221,7 +231,7 @@ function parsePriority(sc) {
     let p = null;
     if (m[2]) {
       if (!accentOk(sc.orig(m.index, m.index + m[0].length))) continue;
-      p = PRIORITY_WORDS[m[2].replace(/\s+/g, ' ')];
+      p = PRIORITY_DIGIT[m[2]] || PRIORITY_WORDS[m[2].replace(/\s+/g, ' ')];
     } else if (m[1].length >= 3) p = 'urgent';
     else if (m[1].length === 2) p = 'high';
     if (!p) continue;
@@ -241,14 +251,31 @@ const DURATION_RULES = [
   { re: `${B}(\\d{1,4})${M_UNIT}${E}`, hours: false, fn: (m) => +m[1] },
 ];
 const TIME_OF_DAY_BEFORE = /(?:^|\s)(?:luc|vao|tu|den|truoc|sau|at)$/;
+// A bare hour directly after a date word ("mai 9h", "thứ 6 14h", "12/10 9h") = time of day.
+// Checked on the UNMASKED folded text (date words may already be consumed).
+const DATE_WORD_BEFORE = /(?:^|\s)(?:mai|nay|kia|mot|cn|nhat|thu\s*[2-7]|t[2-7]|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)$/;
+const foldedBefore = (sc, i) => sc.folded.slice(0, i).replace(/\s+$/, '');
+const EXPLICIT_DURATION = [
+  { re: `~\\s*(\\d{1,2})${H_UNIT}\\s*(\\d{1,2})${M_UNIT}?${E}`, fn: (m) => (+m[2] < 60 ? +m[1] * 60 + +m[2] : null) },
+  { re: `~\\s*(\\d{1,2}(?:[.,]\\d{1,2})?)${H_UNIT}${E}`, fn: (m) => Math.round(parseFloat(m[1].replace(',', '.')) * 60) },
+  { re: `~\\s*(\\d{1,4})${M_UNIT}?${E}`, fn: (m) => +m[1] },
+];
 const TIME_OF_DAY_AFTER = /^(?:sang|trua|chieu|toi|dem|am|pm)(?![\p{L}\p{N}])/u;
 
 function parseDuration(sc) {
+  for (const rule of EXPLICIT_DURATION) {
+    for (const m of sc.matches(rule.re)) {
+      const minutes = rule.fn(m);
+      if (!minutes || minutes < 1 || minutes > 24 * 60) continue;
+      sc.take(m);
+      return minutes;
+    }
+  }
   for (const rule of DURATION_RULES) {
     for (const m of sc.matches(rule.re)) {
       if (!accentOk(sc.orig(m.index, m.index + m[0].length))) continue;
       if (rule.hours) {
-        if (TIME_OF_DAY_BEFORE.test(sc.before(m.index))) continue;
+        if (TIME_OF_DAY_BEFORE.test(sc.before(m.index)) || DATE_WORD_BEFORE.test(foldedBefore(sc, m.index))) continue;
         if (TIME_OF_DAY_AFTER.test(sc.after(m.index + m[0].length))) continue;
       }
       const minutes = rule.fn(m);
@@ -256,6 +283,26 @@ function parseDuration(sc) {
       sc.take(m);
       return minutes;
     }
+  }
+  return null;
+}
+
+// ---- time of day (reported, never consumed) ----------------------------------------
+
+const TOD_RE = `${B}(?:(luc|vao)\\s+)?(\\d{1,2})(?:(?:h|g|\\s*gio)(\\d{2})?|:(\\d{2}))(?:\\s*(sang|trua|chieu|toi|dem|am|pm))?${E}`;
+
+function parseTimeOfDay(sc) {
+  for (const m of sc.matches(TOD_RE)) {
+    let h = +m[2];
+    const min = +(m[3] ?? m[4] ?? 0);
+    const part = m[5];
+    const before = foldedBefore(sc, m.index); // date words are masked by now
+    const cue = m[1] || part || m[4] != null || TIME_OF_DAY_BEFORE.test(before) || DATE_WORD_BEFORE.test(before);
+    if (!cue || h > 23 || min > 59) continue;
+    if ((part === 'chieu' || part === 'toi' || part === 'pm') && h < 12) h += 12;
+    if (part === 'dem' && h >= 6 && h < 12) h += 12;
+    if ((part === 'am' || part === 'sang') && h === 12) h = 0;
+    return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
   }
   return null;
 }
@@ -292,11 +339,27 @@ function matchCategory(query, cats) {
 }
 const cmp = (a, b) => { for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] - b[i]; return 0; };
 
-function parseCategory(sc, categories) {
-  if (!Array.isArray(categories) || !categories.length) return null;
-  const cats = categories
+function prepCategories(categories) {
+  if (!Array.isArray(categories)) return [];
+  return categories
     .filter((c) => c && c.id != null && c.name)
     .map((c, order) => ({ id: c.id, kind: c.kind, n: normalizeVi(c.name), c: compact(normalizeVi(c.name)), order }));
+}
+
+/** "#sales" → the task category literally named "Sales" (accent/space-insensitive). */
+function categoryFromTags(tags, categories) {
+  const cats = prepCategories(categories).filter((c) => !c.kind || c.kind === 'task');
+  for (const t of tags) {
+    const key = compact(normalizeVi(t));
+    const hit = key && cats.find((c) => c.c === key);
+    if (hit) return hit.id;
+  }
+  return null;
+}
+
+function parseCategory(sc, categories) {
+  if (!Array.isArray(categories) || !categories.length) return null;
+  const cats = prepCategories(categories);
   for (const m of sc.matchesOriginal('(?<![\\p{L}\\p{N}_.])@([\\p{L}\\p{N}_\\-]+)', 'gu')) {
     let hit = matchCategory(m[1], cats);
     if (!hit) continue;
@@ -331,13 +394,16 @@ export function parseTaskInput(text, { today, categories } = {}) {
   const sc = new Scanner(text);
 
   const tags = parseTags(sc);
-  const category_id = parseCategory(sc, categories);
+  const category_id = parseCategory(sc, categories) ?? categoryFromTags(tags, categories);
   const priority = parsePriority(sc);
   const { recurrence, due: recurDue } = parseRecurrence(sc, t);
   const estimated_minutes = parseDuration(sc);
   const due_date = recurDue ?? parseDate(sc, t);
+  const due_time = parseTimeOfDay(sc);
 
   let title = sc.remainder();
   if (!title) title = sc.src.replace(/\s+/g, ' ').trim();
-  return { title, due_date, priority, tags, estimated_minutes, category_id, recurrence };
+  const out = { title, due_date, priority, tags, estimated_minutes, category_id, recurrence };
+  if (due_time) out.due_time = due_time;
+  return out;
 }

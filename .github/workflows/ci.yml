@@ -43,7 +43,7 @@ jobs:
   database:
     name: Database migrations (local)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
 
@@ -51,13 +51,44 @@ jobs:
         with:
           version: 2.120.0
 
-      # Dựng Postgres + Auth local và áp dụng TOÀN BỘ supabase/migrations theo thứ tự.
+      # Dựng Postgres + Auth + REST local và áp dụng TOÀN BỘ supabase/migrations theo thứ tự.
       # Migration lỗi → job đỏ, không bao giờ tới production.
-      - name: Apply migrations on a fresh local database
-        run: supabase db start
+      # Phải là `supabase start` ngay từ đầu: nếu chạy `db start` trước thì `start` sau đó
+      # coi stack là "đã chạy" và không bật Auth/REST/API gateway.
+      - name: Apply migrations on a fresh local stack (Postgres + Auth + REST)
+        run: supabase start -x studio,imgproxy,vector,logflare,edge-runtime,realtime,storage-api,mailpit,postgres-meta,supavisor
 
       - name: Lint database schema
         run: supabase db lint --fail-on error
+
+      # Service layer chạy thật qua supabase-js → Auth (GoTrue) + PostgREST + Postgres local.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Wait for local API gateway
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:54321/rest/v1/ || true)
+            [ "$code" != "000" ] && exit 0
+            sleep 2
+          done
+          echo "::error::Local Supabase API (127.0.0.1:54321) is not responding"
+          supabase status || true
+          exit 1
+
+      # Stack local dùng JWT secret mặc định (config.toml không đổi) → URL và anon/service key
+      # là giá trị demo công khai của Supabase CLI, không phải secret. Đặt thẳng để test không
+      # phụ thuộc định dạng output của `supabase status` (khác nhau giữa các bản CLI).
+      - name: Integration tests (real Supabase stack)
+        env:
+          IT_SUPABASE_URL: http://127.0.0.1:54321
+          IT_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0
+          IT_SERVICE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU
+        run: npm run test:integration
 
       - name: Stop local database
         if: always()

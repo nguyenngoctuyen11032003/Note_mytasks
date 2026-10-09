@@ -22,7 +22,7 @@
 // - amount is null when no number is found; description = what remains (original casing).
 
 import { addDays, weekday } from '../../utils/date.js';
-import { Scanner, B, E, accentOk, isoDay, validYmd, mondayOf, resolveToday } from './text.js';
+import { Scanner, B, E, accentOk, isoDay, validYmd, mondayOf, resolveToday, normalizeVi } from './text.js';
 
 const MAX_AMOUNT = 1e12;
 
@@ -208,4 +208,95 @@ export function parseExpenseInput(text, { today } = {}) {
   const payment_method = parsePayment(sc);
   const amount = parseAmount(sc);
   return { amount, description: sc.remainder(), spent_on, payment_method };
+}
+
+// ---- category hashtag (quick-entry bar) ------------------------------------------
+
+const TAG_SPLIT = /[\s]+/u;
+const foldTag = (s) => normalizeVi(String(s).replace(/[_\-.]+/g, ' '));
+
+/**
+ * Find "#<category>" in the text. The hashtag may span several words
+ * ("#ăn uống", "#an_uong", "#đi-lại"); the longest phrase equal to a category
+ * name wins, else a single word that prefixes a category name ("#an" → Ăn uống).
+ * An unknown tag is still removed and reported as `hint`.
+ * @returns {{ text: string, category_id: string|null, hint: string|null }}
+ */
+export function extractCategoryTag(text, categories = []) {
+  const src = String(text ?? '').normalize('NFC');
+  const m = /(^|\s)#(\S*)/u.exec(src);
+  if (!m) return { text: src, category_id: null, hint: null };
+  const start = m.index + m[1].length;
+  const after = src.slice(start + 1);
+  const words = after.split(TAG_SPLIT);
+  const cats = (categories || []).filter((c) => c && c.id != null && (!c.kind || c.kind === 'expense'))
+    .map((c) => ({ id: c.id, key: foldTag(c.name) }));
+  let used = 0;
+  let id = null;
+  for (let k = Math.min(4, words.length); k >= 1 && !id; k--) {
+    const phrase = foldTag(words.slice(0, k).join(' '));
+    if (!phrase) continue;
+    const hit = cats.find((c) => c.key === phrase);
+    if (hit) { id = hit.id; used = k; }
+  }
+  const first = foldTag(words[0] || '');
+  if (!id && first) {
+    const hit = cats.find((c) => c.key.startsWith(first)) || cats.find((c) => c.key.replace(/ /g, '').startsWith(first.replace(/ /g, '')));
+    if (hit) id = hit.id;
+    used = 1;
+  }
+  // length of "#" + the consumed words (with their separators) in the original text
+  let len = 1;
+  if (used) {
+    const re = new RegExp(`^(?:\\S+)(?:\\s+\\S+){${used - 1}}`, 'u');
+    len += (re.exec(after)?.[0].length) || 0;
+  }
+  const rest = (src.slice(0, start) + ' ' + src.slice(start + len)).replace(/\s+/g, ' ').trim();
+  return { text: rest, category_id: id, hint: id ? null : (words[0] || null) };
+}
+
+/**
+ * Quick-entry parse = parseExpenseInput + "#danh mục".
+ * @returns {{amount, description, spent_on, payment_method, category_id: string|null, category_hint: string|null}}
+ */
+export function parseExpenseEntry(text, { today, categories = [] } = {}) {
+  const tag = extractCategoryTag(text, categories);
+  const base = parseExpenseInput(tag.text, { today });
+  return { ...base, category_id: tag.category_id, category_hint: tag.hint };
+}
+
+// ---- shopping quick-add ---------------------------------------------------------------
+
+const QTY_RE = `(?<![\\p{L}\\p{N}])(?:x\\s*(\\d{1,4})|(\\d{1,4})\\s*x|sl\\s*:?\\s*(\\d{1,4}))(?![\\p{L}\\p{N}])`;
+const MUST_RE = `${B}(?:phai\\s+mua|can\\s+gap|gap)${E}`;
+
+/**
+ * "sữa tắm 120k x2 !" → { name: 'sữa tắm', unit_price: 120000, quantity: 2, priority: 'high' }
+ * - quantity: "x2", "2x", "sl 2" (default 1)
+ * - priority: "!!" / "gấp" / "phải mua" → must_buy, "!" → high (null when absent)
+ * - price: same amount rules as expenses (k / tr / grouped / bare < 1000 = thousands),
+ *   read as the UNIT price. null when absent.
+ */
+export function parseShoppingInput(text) {
+  let src = String(text ?? '').normalize('NFC');
+  let priority = null;
+  const bang = /(^|\s)(!{1,3})(?=\s|$)/u.exec(src);
+  if (bang) {
+    priority = bang[2].length >= 2 ? 'must_buy' : 'high';
+    src = (src.slice(0, bang.index) + ' ' + src.slice(bang.index + bang[0].length)).trim();
+  }
+  const sc = new Scanner(src);
+  for (const m of sc.matches(MUST_RE)) {
+    if (!accentOk(sc.orig(m.index, m.index + m[0].length))) continue;
+    sc.take(m);
+    priority = 'must_buy';
+    break;
+  }
+  let quantity = 1;
+  for (const m of sc.matches(QTY_RE)) {
+    const q = Number(m[1] || m[2] || m[3]);
+    if (q >= 1 && q <= 9999) { quantity = q; sc.take(m); break; }
+  }
+  const unit_price = parseAmount(sc);
+  return { name: sc.remainder(), unit_price, quantity, priority };
 }

@@ -51,6 +51,11 @@ export async function signUp(email, password, displayName) {
   return data;
 }
 
+/** Re-send the sign-up confirmation link (Supabase rate-limits this server-side). */
+export async function resendConfirmation(email) {
+  return run(db().auth.resend({ type: 'signup', email: vEmail(email), options: { emailRedirectTo: appBaseUrl() } }));
+}
+
 export async function signOut() {
   let res;
   try {

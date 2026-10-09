@@ -100,3 +100,43 @@ Tuần bắt đầu theo `profiles.week_starts_on`. `running` = `timer_current()
 - Mỗi hàm `async`, trả dữ liệu đã chuẩn hóa (number cho tiền), ném `AppError {code, message(vi), cause}` từ `errors.js`.
 - Whitelist cột ghi (không bao giờ gửi `user_id`, `actual_minutes`, `completed_at`, `current_value`, `total_price`, `duration_seconds`).
 - Files: `errors.js`, `auth.js`, `profile.js`, `categories.js`, `tasks.js`, `timer.js`, `expenses.js`, `budgets.js`, `shopping.js`, `kpis.js`, `activity.js`, `dashboard.js`, `reports.js` (export CSV dùng `utils/csv.js`).
+
+## 6. Notes (`20261009000700_notes.sql`, `src/services/notes.js`)
+
+### Schema `public.notes`
+| Cột | Kiểu | Ràng buộc |
+|---|---|---|
+| `id` | uuid PK | `unique (id, user_id)` |
+| `user_id` | uuid | default `auth.uid()`, FK `auth.users` cascade |
+| `title` | text not null default `''` | ≤ 200 (được để trống) |
+| `content` | text not null default `''` | Markdown, ≤ 100 000 |
+| `notebook` | text null | sổ tự do, 1–60 ký tự (sau trim) |
+| `tags` | text[] | ≤ 20, GIN |
+| `color` | text null | `^#[0-9a-fA-F]{6}$` |
+| `pinned`, `archived` | bool | default false |
+| `trashed_at` | timestamptz null | ≠ null = trong Thùng rác (xóa mềm) |
+| `task_id` | uuid null | composite FK `(task_id, user_id)` → `tasks` `on delete set null (task_id)` |
+| `kind` | text | `note` · `checklist` · `journal` · `meeting` (default `note`) |
+| `search` | tsvector generated | `notes_search_document(title, tags, content)`, config `simple`, GIN — không cần extension |
+| `created_at`, `updated_at` | timestamptz | trigger `set_updated_at` |
+
+RLS: 4 policy `notes_{select,insert,update,delete}_own` cho `authenticated` (UPDATE có USING + WITH CHECK); `anon` bị revoke. Không ghi `activity_logs` (autosave quá dày; CHECK `entity_type` thuộc 000100). Test: `supabase/tests/notes.test.sql`.
+
+### Service
+| Hàm | Trả về | Ghi chú |
+|---|---|---|
+| `listNotes({ search, notebook, tag, kind, pinned, archived=false, trashed=false, limit=500 })` | rows | `trashed=true` → chỉ Thùng rác (bỏ qua `archived`), sắp theo `trashed_at` desc; còn lại `pinned` desc, `updated_at` desc. `search`: ILIKE title/content **hoặc** tiền tố từ (`fts(simple)`, gồm cả thẻ). |
+| `getNote(id)` | row \| null | |
+| `createNote(input)` / `updateNote(id, patch)` | row | whitelist: title, content, notebook, tags, color, pinned, archived, trashed_at, task_id, kind. `content` không bị trim. |
+| `trashNote(id)` / `restoreNote(id)` | row | trash đồng thời bỏ ghim |
+| `deleteNote(id)` | true | xóa vĩnh viễn |
+| `emptyTrash()` | số dòng đã xóa | |
+| `listNotebooks()` | `[{name, count}]` | ghi chú sống (không trash, không lưu trữ) |
+| `listNoteTags()` | `[{tag, count}]` | như trên, nhiều nhất trước |
+| `noteOverview()` | `{counts:{all,pinned,note,checklist,journal,meeting,archived,trash}, notebooks, tags}` | 1 truy vấn cho sidebar |
+| `renameNotebook(from, to)` | số dòng | `to = null` → gỡ sổ, giữ ghi chú |
+
+Row: `{id, title, content, notebook, tags, color, pinned, archived, trashed_at, task_id, kind, created_at, updated_at}` (không trả `search`).
+
+### Deep link (trang `#/notes`)
+`?id=<uuid>` mở ghi chú · `?new=1` mở bảng chọn mẫu (`&task=<uuid>` để gắn sẵn công việc) · `?view=pinned|checklist|journal|meeting|archived|trash` · `?nb=<sổ>` · `?tag=<thẻ>` · `?q=<từ khóa>` · `?sort=created|title`. Trang khác có thể `notifyDataChanged('notes')` để danh sách tải lại.

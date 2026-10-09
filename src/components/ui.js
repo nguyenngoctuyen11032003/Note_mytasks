@@ -67,7 +67,7 @@ export function pageHead({ num, kicker, title, lede, actions = '' }) {
   return html`
     <header class="page-head">
       <div>
-        <div class="page-head__eyebrow"><span class="eyebrow">§ ${num}</span><span class="eyebrow">${kicker}</span></div>
+        ${kicker ? html`<div class="page-head__eyebrow"><span class="eyebrow">${kicker}</span></div>` : ''}
         <h1>${raw(title)}</h1>
         ${lede ? html`<p class="page-head__lede">${lede}</p>` : ''}
       </div>
@@ -75,8 +75,9 @@ export function pageHead({ num, kicker, title, lede, actions = '' }) {
     </header>`;
 }
 
+// `num` is accepted for compatibility but no longer rendered (no section numbering in the UI).
 export function sheetHead(num, title, right = '') {
-  return html`<div class="sheet__head"><div class="sheet__title"><span class="sheet__num">${num}</span><h2>${title}</h2></div>${right}</div>`;
+  return html`<div class="sheet__head"><div class="sheet__title"><h2>${title}</h2></div>${right}</div>`;
 }
 
 /* ---------- Popover menu ---------- */

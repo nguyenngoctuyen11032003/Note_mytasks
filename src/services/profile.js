@@ -69,6 +69,68 @@ export async function getProfile(userId) {
   return run(db().from('profiles').select(PROFILE_COLS).eq('id', id).maybeSingle());
 }
 
+/* ------------------------------------------------------------------ */
+/* Device-local preferences (no DB column): avatar colour, landing page */
+/* ------------------------------------------------------------------ */
+
+const AVATAR_KEY = 'nm.avatarColor';
+const HOME_KEY = 'nm.home';
+export const HOME_PAGES = [
+  { path: '/dashboard', label: 'Tổng quan' },
+  { path: '/notes', label: 'Ghi chú' },
+  { path: '/tasks', label: 'Công việc' },
+  { path: '/calendar', label: 'Lịch' },
+  { path: '/time', label: 'Thời gian' },
+  { path: '/kpi', label: 'KPI' },
+  { path: '/expenses', label: 'Chi tiêu' },
+  { path: '/shopping', label: 'Mua sắm' },
+  { path: '/reports', label: 'Báo cáo' },
+];
+
+const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+const lsSet = (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* private mode */ } };
+
+/** Avatar initials colour ('#RRGGBB') or null = default ink. */
+export function getAvatarColor() {
+  const c = lsGet(AVATAR_KEY);
+  return c && /^#[0-9a-f]{6}$/i.test(c) ? c : null;
+}
+
+/** Exposes the colour as CSS vars --avatar-bg / --avatar-fg (used by .avatar). */
+export function applyAvatarColor(color = getAvatarColor()) {
+  if (typeof document === 'undefined') return;
+  const s = document.documentElement.style;
+  if (color) {
+    s.setProperty('--avatar-bg', color);
+    s.setProperty('--avatar-fg', 'var(--accent-contrast)');
+  } else {
+    s.removeProperty('--avatar-bg');
+    s.removeProperty('--avatar-fg');
+  }
+}
+
+export function setAvatarColor(color) {
+  const c = color && /^#[0-9a-f]{6}$/i.test(color) ? color : null;
+  lsSet(AVATAR_KEY, c);
+  applyAvatarColor(c);
+  return c;
+}
+
+/** Default landing page after sign-in (localStorage 'nm.home', read by the shell). */
+export function getHomePage() {
+  const p = lsGet(HOME_KEY);
+  return HOME_PAGES.some((h) => h.path === p) ? p : '/dashboard';
+}
+export function setHomePage(path) {
+  const p = HOME_PAGES.some((h) => h.path === path) ? path : '/dashboard';
+  lsSet(HOME_KEY, p);
+  return p;
+}
+
+// Boot: this module is loaded at start-up, so the saved avatar colour shows
+// everywhere without the shell having to know about it.
+applyAvatarColor();
+
 /** Compat: updateProfile(userId, patch) or updateProfile(patch). */
 export async function updateProfile(userId, patch) {
   if (userId && typeof userId === 'object') return update(userId);

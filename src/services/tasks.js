@@ -1,4 +1,4 @@
-// Tasks service. Server-owned columns (user_id, actual_minutes, completed_at,
+// Tasks service. Bulk helpers + restore/duplicate at the bottom. Server-owned columns (user_id, actual_minutes, completed_at,
 // created_at, updated_at) are never sent — DB triggers maintain them.
 import { today } from '../utils/date.js';
 import {
@@ -58,6 +58,15 @@ export function validateTask(input, { partial = false } = {}) {
 
 const normalize = (rows) => numify(rows, ['estimated_minutes', 'actual_minutes']);
 
+// supabase-js joins array values unquoted (`cs.{a,b}`), so a tag containing
+// `, " { } \` or spelled NULL would be mis-parsed by Postgres (wrong matches or
+// "malformed array literal"). Such tags are sent as a quoted array literal.
+export function tagFilterValue(tag) {
+  const t = String(tag).trim();
+  if (/[,"{}\\]/.test(t) || /^null$/i.test(t)) return `{"${t.replace(/[\\"]/g, (c) => '\\' + c)}"}`;
+  return [t];
+}
+
 const oneOrMany = (q, col, v) => {
   if (Array.isArray(v)) return v.length ? q.in(col, v) : q;
   return v ? q.eq(col, v) : q;
@@ -80,7 +89,7 @@ export async function listTasks(f = {}) {
   q = oneOrMany(q, 'priority', f.priority);
   if (f.categoryId === 'none') q = q.is('category_id', null);
   else if (f.categoryId) q = q.eq('category_id', f.categoryId);
-  if (f.tag) q = q.contains('tags', [String(f.tag).trim()]);
+  if (f.tag) q = q.contains('tags', tagFilterValue(f.tag));
   if (f.dueFrom) q = q.gte('due_date', vDay(f.dueFrom, 'dueFrom'));
   if (f.dueTo) q = q.lte('due_date', vDay(f.dueTo, 'dueTo'));
   if (f.overdue) {
@@ -145,6 +154,55 @@ export async function listCompletedBetween(fromIso, toIso) {
   const q = db().from('tasks').select('id, title, completed_at, category_id, actual_minutes')
     .gte('completed_at', fromIso).lt('completed_at', toIso).order('completed_at', { ascending: true });
   return normalize(await run(q));
+}
+
+// ---- Bulk operations (Tasks page multi-select) -------------------------------------
+
+const MAX_BULK = 500;
+
+function requireIds(ids) {
+  const list = [...new Set((Array.isArray(ids) ? ids : [ids]).filter((x) => typeof x === 'string' && x.trim()))];
+  if (!list.length) throw invalid('ids', 'Chưa chọn công việc nào.');
+  if (list.length > MAX_BULK) throw invalid('ids', `Tối đa ${MAX_BULK} công việc mỗi lần.`);
+  return list;
+}
+
+/** Apply the same partial patch to many tasks. Returns the updated rows. */
+export async function bulkUpdateTasks(ids, patch) {
+  const list = requireIds(ids);
+  const row = requireNonEmpty(validateTask(patch, { partial: true }));
+  return normalize(await run(db().from('tasks').update(row).in('id', list).select(SELECT)));
+}
+
+/** Set status on many tasks (completed_at / recurrences are handled by DB triggers). */
+export async function bulkSetTaskStatus(ids, status) {
+  const list = requireIds(ids);
+  const s = vEnum(status, 'status', TASK_STATUSES, { required: true, label: 'Trạng thái' });
+  return normalize(await run(db().from('tasks').update({ status: s }).in('id', list).select(SELECT)));
+}
+
+export async function bulkDeleteTasks(ids) {
+  const list = requireIds(ids);
+  await run(db().from('tasks').delete().in('id', list));
+  return list.length;
+}
+
+/** Writable snapshot of a task (drops server-owned columns and absent recurrence). */
+export function taskSnapshot(task) {
+  const snap = pick(task, TASK_WRITABLE);
+  if (snap.recurrence == null) delete snap.recurrence;
+  return snap;
+}
+
+/** Re-create a deleted task from a snapshot (undo). Gets a new id. */
+export async function restoreTask(task) {
+  return createTask(taskSnapshot(task));
+}
+
+/** Copy of a task as a fresh "todo". */
+export async function duplicateTask(task, { title } = {}) {
+  const snap = taskSnapshot(task);
+  return createTask({ ...snap, status: 'todo', title: title || `${snap.title} (bản sao)`.slice(0, 200) });
 }
 
 // Short aliases (tasks.list / tasks.get …)

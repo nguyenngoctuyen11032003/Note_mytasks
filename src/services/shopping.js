@@ -35,6 +35,9 @@ export function validateItem(input, { partial = false } = {}) {
 
 const normalize = (rows) => numify(rows, ['unit_price', 'quantity', 'total_price']);
 
+const LIST_PAGE = 1000; // PostgREST max_rows
+const LIST_CAP = 5000;
+
 export async function listItems({ status, categoryId, search } = {}) {
   let q = db().from('shopping_items').select(SELECT);
   if (Array.isArray(status)) {
@@ -44,8 +47,16 @@ export async function listItems({ status, categoryId, search } = {}) {
   else if (categoryId) q = q.eq('category_id', categoryId);
   const s = typeof search === 'string' ? search.trim() : '';
   if (s) q = q.or(searchOr(s, ['name', 'note']));
-  q = q.order('created_at', { ascending: false }).limit(2000);
-  return normalize(await run(q));
+  q = q.order('created_at', { ascending: false }).order('id', { ascending: true });
+  // PostgREST caps each response at max_rows (1000): page so nothing is silently dropped.
+  const out = [];
+  while (out.length < LIST_CAP) {
+    const want = Math.min(LIST_PAGE, LIST_CAP - out.length);
+    const rows = (await run(q.range(out.length, out.length + want - 1))) || [];
+    out.push(...rows);
+    if (rows.length < want) break;
+  }
+  return normalize(out);
 }
 
 export async function createItem(input) {
@@ -96,6 +107,44 @@ export async function markPurchased(item, { purchased_on = null, createExpenseRo
     await run(db().from('expenses').update({ category_id: expenseCategoryId }).eq('id', row.expense_id));
   }
   return row;
+}
+
+/**
+ * Purchase with the price actually paid. The planned price stays on the item;
+ * the linked expense records the real amount:
+ * - item without a planned price → its unit price is set from the actual total
+ *   first (the RPC only files an expense when total_price > 0);
+ * - actual ≠ planned → the expense created by the RPC is corrected afterwards.
+ * Returns the updated shopping_items row.
+ */
+export async function purchaseWithPrice(item, { actualTotal = null, spentOn = null, paymentMethod = 'cash', createExpense = true, expenseCategoryId = null } = {}) {
+  const id = typeof item === 'string' ? item : item?.id;
+  requireId(id);
+  const planned = Number(item?.total_price) || 0;
+  const qty = Math.max(1, Number(item?.quantity) || 1);
+  const actual = actualTotal == null || actualTotal === ''
+    ? null
+    : vNumber(actualTotal, 'actualTotal', { min: 0, max: 999_999_999_999.99, label: 'Giá thực tế' });
+  if (createExpense && planned <= 0 && actual > 0) {
+    await run(db().from('shopping_items').update({ unit_price: Math.round((actual / qty) * 100) / 100 }).eq('id', id));
+  }
+  const row = await markPurchased(item, { purchased_on: spentOn, createExpenseRow: createExpense, expenseCategoryId, payment_method: paymentMethod });
+  if (createExpense && row?.expense_id && actual > 0 && planned > 0 && Math.abs(actual - planned) >= 0.01) {
+    await run(db().from('expenses').update({ amount: actual }).eq('id', row.expense_id));
+  }
+  return row;
+}
+
+/**
+ * Undo a purchase: optionally delete the linked expense, then move the item
+ * back to an open status (purchased_on cleared).
+ */
+export async function revertPurchase(item, { status = 'planned', removeExpense = true } = {}) {
+  const id = typeof item === 'string' ? item : item?.id;
+  requireId(id);
+  const next = vEnum(status, 'status', STATUSES.filter((s) => s !== 'purchased'), { required: true, label: 'Trạng thái' });
+  if (removeExpense && item?.expense_id) await run(db().from('expenses').delete().eq('id', item.expense_id));
+  return normalize(await run(db().from('shopping_items').update({ status: next, purchased_on: null }).eq('id', id).select(SELECT).single()));
 }
 
 export { listItems as listShopping, listItems as list, createItem as create, updateItem as update, deleteItem as remove, deleteItem as delete };
