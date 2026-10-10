@@ -21,7 +21,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import fs from 'node:fs';
 import path from 'node:path';
-import { ROOT, migrationFiles } from './lib.mjs';
+import { ROOT, STORAGE_STUB, migrationFiles } from './lib.mjs';
 
 const STUB = `
   do $$ begin
@@ -37,6 +37,7 @@ const STUB = `
   create or replace function auth.uid() returns uuid language sql stable as $f$
     select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $f$;
   grant execute on function auth.uid() to anon, authenticated, service_role;
+  ${STORAGE_STUB}
   alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
   alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
 `;
