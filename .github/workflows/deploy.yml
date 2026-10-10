@@ -1,4 +1,5 @@
-# Production: push lên main → CI → (migration Supabase nếu có thay đổi) → build → GitHub Pages.
+# Production: push lên main → CI → (migration Supabase nếu có thay đổi)
+#   → (deploy Edge Functions nếu supabase/functions/** đổi) song song với build → GitHub Pages.
 #
 # AN TOÀN DATABASE: project Supabase dùng chung với app khác. Workflow này CHỈ chạy
 # `supabase db push` (thêm migration chưa áp dụng). Không bao giờ reset / drop /
@@ -12,6 +13,10 @@ on:
     inputs:
       migrate:
         description: Chạy bước migration Supabase kể cả khi không có file migration mới
+        type: boolean
+        default: false
+      functions:
+        description: Deploy Edge Functions (fitora-food-ai) kể cả khi supabase/functions không đổi
         type: boolean
         default: false
 
@@ -28,10 +33,11 @@ jobs:
     uses: ./.github/workflows/ci.yml
 
   changes:
-    name: Detect migration changes
+    name: Detect migration / function changes
     runs-on: ubuntu-latest
     outputs:
       migrations: ${{ steps.diff.outputs.migrations }}
+      functions: ${{ steps.diff.outputs.functions }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -41,21 +47,31 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           FORCE: ${{ inputs.migrate }}
+          FORCE_FUNCTIONS: ${{ inputs.functions }}
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.sha }}
         run: |
+          # changed <path>: "true" nếu path đổi giữa BEFORE..AFTER (hoặc không so được).
+          changed() {
+            if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]                || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+              echo true   # nhánh mới / force-push: không so được → kiểm tra (db push tự bỏ qua nếu không có gì mới)
+            elif git diff --quiet "$BEFORE" "$AFTER" -- "$1"; then
+              echo false
+            else
+              echo true
+            fi
+          }
           if [ "$EVENT" = "workflow_dispatch" ]; then
-            result="$FORCE"
-          elif [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] \
-               || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
-            result=true   # nhánh mới / force-push: không so được → kiểm tra (db push tự bỏ qua nếu không có gì mới)
-          elif git diff --quiet "$BEFORE" "$AFTER" -- supabase/migrations; then
-            result=false
+            migrations="$FORCE"
+            functions="$FORCE_FUNCTIONS"
           else
-            result=true
+            migrations=$(changed supabase/migrations)
+            functions=$(changed supabase/functions)
           fi
-          echo "migrations=$result" >> "$GITHUB_OUTPUT"
-          echo "Migration step: $result"
+          echo "migrations=$migrations" >> "$GITHUB_OUTPUT"
+          echo "functions=$functions" >> "$GITHUB_OUTPUT"
+          echo "Migration step: $migrations"
+          echo "Functions step: $functions"
 
   migrate:
     name: Supabase db push
@@ -92,6 +108,43 @@ jobs:
 
       - name: Apply migrations
         run: supabase db push --yes
+
+  functions:
+    name: Supabase functions deploy
+    needs: [verify, changes, migrate]
+    # Sau migrate (function gọi RPC fit_ai_quota_consume): chạy khi migrate thành công
+    # hoặc được bỏ qua. Không chặn build/pages: site Note_mytasks không dùng function này.
+    if: >-
+      always() &&
+      needs.verify.result == 'success' &&
+      needs.changes.result == 'success' &&
+      needs.changes.outputs.functions == 'true' &&
+      (needs.migrate.result == 'success' || needs.migrate.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ vars.SUPABASE_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: supabase/setup-cli@v3
+        with:
+          version: 2.120.0
+
+      - name: Check required secrets
+        run: |
+          missing=0
+          for v in SUPABASE_ACCESS_TOKEN SUPABASE_PROJECT_ID; do
+            if [ -z "${!v}" ]; then echo "::error::Thiếu $v"; missing=1; fi
+          done
+          exit $missing
+
+      # verify_jwt lấy từ [functions.fitora-food-ai] trong supabase/config.toml.
+      # Secrets của function (ANTHROPIC_API_KEY, …) đặt một lần bằng `supabase secrets set`, xem docs/DEPLOY.md.
+      - name: Deploy fitora-food-ai
+        run: supabase functions deploy fitora-food-ai --project-ref "$SUPABASE_PROJECT_ID"
 
   build:
     name: Build site
