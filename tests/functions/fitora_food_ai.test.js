@@ -219,3 +219,42 @@ describe('request building', () => {
     expect(responseText(null)).toBe('');
   });
 });
+
+describe('sanitizeDish: nutrition consistency', () => {
+  const base = { name: 'Cơm tấm sườn', quantity: 1, unit: 'đĩa', grams: 400, protein_g: 30, carbs_g: 80, fat_g: 25, fiber_g: 3, confidence: 0.8 };
+
+  it('keeps kcal that agrees with 4P+4C+9F', () => {
+    expect(sanitizeDish({ ...base, kcal: 680 }).kcal).toBe(680); // atwater = 665
+  });
+
+  it('replaces kcal far below the macros (e.g. per-100 g slip) with the Atwater estimate', () => {
+    expect(sanitizeDish({ ...base, kcal: 170 }).kcal).toBe(665);
+  });
+
+  it('keeps kcal above the macros (alcohol is not in the macros)', () => {
+    const beer = sanitizeDish({ name: 'Bia', quantity: 1, unit: 'lon', grams: 330, kcal: 140, protein_g: 1.5, carbs_g: 11, fat_g: 0 });
+    expect(beer.kcal).toBe(140);
+  });
+
+  it('weight is never lighter than its macros', () => {
+    expect(sanitizeDish({ ...base, kcal: 665, grams: 50 }).grams).toBe(138);
+    expect(sanitizeDish({ ...base, kcal: 665, grams: 0 }).grams).toBe(0); // unknown stays unknown
+  });
+
+  it('quarter portions survive and gram-like units are normalised', () => {
+    expect(sanitizeDish({ ...base, kcal: 665, quantity: 0.25 }).quantity).toBe(0.25);
+    const g = sanitizeDish({ name: 'Ức gà', quantity: 1, unit: 'gram', grams: 150, kcal: 248, protein_g: 46, fat_g: 5.4 });
+    expect(g).toMatchObject({ unit: 'g', quantity: 150, grams: 150 });
+    const g2 = sanitizeDish({ name: 'Ức gà', quantity: 120, unit: 'g', grams: 0, kcal: 198 });
+    expect(g2).toMatchObject({ unit: 'g', quantity: 120, grams: 120 });
+    const ml = sanitizeDish({ name: 'Sữa tươi', quantity: 180, unit: 'ml', grams: 0, kcal: 117 });
+    expect(ml).toMatchObject({ unit: 'ml', quantity: 180, grams: 180 });
+  });
+
+  it('prompt anchors realistic Vietnamese portions and the energy formula', async () => {
+    const { SYSTEM_PROMPT } = await import('../../supabase/functions/fitora-food-ai/lib.ts');
+    expect(SYSTEM_PROMPT).toMatch(/4×protein \+ 4×carbs \+ 9×fat/);
+    expect(SYSTEM_PROMPT).toMatch(/bát cơm trắng ~150–200 g/);
+    expect(SYSTEM_PROMPT).toMatch(/"grams" luôn > 0/);
+  });
+});
