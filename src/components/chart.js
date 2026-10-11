@@ -1,11 +1,27 @@
 // Chart.js wrapper that reads colours from the CSS design tokens so charts
 // match the theme (light/dark) without per-chart configuration.
-import {
-  Chart, BarController, BarElement, LineController, LineElement, PointElement,
-  DoughnutController, ArcElement, CategoryScale, LinearScale, Tooltip, Filler, Legend,
-} from 'chart.js';
+//
+// Chart.js (~200 kB) is imported dynamically so a chart page's own code runs
+// (and its data fetches start) without waiting for the library to download
+// and parse. The warm-up call at the bottom of this module starts the fetch
+// immediately, in parallel with the page's Supabase queries, so the first
+// chart still draws as soon as its data arrives.
+let ChartCtor = null; // the registered Chart constructor once the library is in
+let libPromise = null;
 
-Chart.register(BarController, BarElement, LineController, LineElement, PointElement, DoughnutController, ArcElement, CategoryScale, LinearScale, Tooltip, Filler, Legend);
+function loadChart() {
+  libPromise ||= import('chart.js').then((m) => {
+    m.Chart.register(
+      m.BarController, m.BarElement, m.LineController, m.LineElement, m.PointElement,
+      m.DoughnutController, m.ArcElement, m.CategoryScale, m.LinearScale, m.Tooltip, m.Filler, m.Legend,
+    );
+    ChartCtor = m.Chart;
+    return m.Chart;
+  });
+  // A failed fetch (flaky network) resets the memo so the next chart retries.
+  libPromise.catch(() => { libPromise = null; });
+  return libPromise;
+}
 
 const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)');
 
@@ -32,7 +48,7 @@ export function series() {
   return [p.accent, p.indigo, p.moss, p.ochre, p.plum, p.clay, p.ink3];
 }
 
-function baseOptions(kind) {
+function baseOptions(kind, Chart) {
   const p = palette();
   Chart.defaults.font.family = token('--font-sans') || 'system-ui';
   Chart.defaults.font.size = 11;
@@ -103,11 +119,24 @@ export function makeChart(container, { type, data, options }) {
   container.innerHTML = '';
   const canvas = document.createElement('canvas');
   container.append(canvas);
-  const opts = merge(baseOptions(type), options);
-  // Printing: draw the final frame immediately so the print snapshot is never mid-animation.
-  if (document.documentElement.dataset.print || redraw || REDUCED.matches) opts.animation = false;
-  // Chart.js defaults to 1s: long enough to read as lag on every page open.
-  else if (opts.animation !== false) opts.animation = { duration: 450, ...(opts.animation || {}) };
-  const chart = new Chart(canvas, { type, data, options: opts });
-  return () => chart.destroy();
+  let chart = null;
+  let destroyed = false;
+  const draw = (Chart) => {
+    if (destroyed || !canvas.isConnected) return;
+    const opts = merge(baseOptions(type, Chart), options);
+    // Printing: draw the final frame immediately so the print snapshot is never mid-animation.
+    if (document.documentElement.dataset.print || redraw || REDUCED.matches) opts.animation = false;
+    // Chart.js defaults to 1s: long enough to read as lag on every page open.
+    else if (opts.animation !== false) opts.animation = { duration: 450, ...(opts.animation || {}) };
+    chart = new Chart(canvas, { type, data, options: opts });
+  };
+  // Library already in: draw synchronously, exactly as before the lazy import
+  // (redraws on data refresh / theme flips never wait a microtask).
+  if (ChartCtor) draw(ChartCtor);
+  else loadChart().then(draw).catch((err) => console.error(err));
+  return () => { destroyed = true; chart?.destroy(); chart = null; };
 }
+
+// Warm-up: start downloading Chart.js the moment a chart page's chunk loads
+// (also covers main.js's idle route prefetch), without blocking that chunk.
+loadChart().catch(() => {});
