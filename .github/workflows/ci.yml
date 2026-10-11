@@ -59,7 +59,9 @@ jobs:
       # Unit test của lib.ts chạy trong `npm test` (vitest); job này bắt lỗi kiểu/import
       # phía Deno (npm: specifier, Deno.* API) mà vitest không thấy.
       - name: Type-check every function entrypoint
-        run: deno check supabase/functions/*/index.ts
+        # --node-modules-dir=none: root package.json would otherwise make Deno
+        # expect a node_modules/ with the npm: deps (not installed in this job).
+        run: deno check --node-modules-dir=none supabase/functions/*/index.ts
 
   database:
     name: Database migrations (local)
