@@ -16,7 +16,7 @@ on:
         type: boolean
         default: false
       functions:
-        description: Deploy Edge Functions (fitora-food-ai) kể cả khi supabase/functions không đổi
+        description: Deploy mọi Edge Function kể cả khi supabase/functions không đổi
         type: boolean
         default: false
 
@@ -34,7 +34,7 @@ jobs:
 
   changes:
     name: Detect migration / function changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       migrations: ${{ steps.diff.outputs.migrations }}
       functions: ${{ steps.diff.outputs.functions }}
@@ -77,7 +77,7 @@ jobs:
     name: Supabase db push
     needs: [verify, changes]
     if: needs.changes.outputs.migrations == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     # Tạo environment "production" trong GitHub và bật "Required reviewers"
     # để mỗi lần đổi database phải bấm duyệt.
@@ -120,7 +120,7 @@ jobs:
       needs.changes.result == 'success' &&
       needs.changes.outputs.functions == 'true' &&
       (needs.migrate.result == 'success' || needs.migrate.result == 'skipped')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: production
     env:
@@ -143,8 +143,10 @@ jobs:
 
       # verify_jwt lấy từ [functions.fitora-food-ai] trong supabase/config.toml.
       # Secrets của function (ANTHROPIC_API_KEY, …) đặt một lần bằng `supabase secrets set`, xem docs/DEPLOY.md.
-      - name: Deploy fitora-food-ai
-        run: supabase functions deploy fitora-food-ai --project-ref "$SUPABASE_PROJECT_ID"
+      # Không truyền tên → deploy MỌI function trong supabase/functions (hiện có fitora-food-ai),
+      # để function thêm sau này không bị bỏ sót.
+      - name: Deploy all Edge Functions
+        run: supabase functions deploy --project-ref "$SUPABASE_PROJECT_ID"
 
   build:
     name: Build site
@@ -155,7 +157,7 @@ jobs:
       needs.verify.result == 'success' &&
       needs.changes.result == 'success' &&
       (needs.migrate.result == 'success' || needs.migrate.result == 'skipped')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
@@ -185,7 +187,7 @@ jobs:
     # Mặc định success() xét cả job gián tiếp: migrate bị skip (không có migration mới)
     # sẽ kéo theo job này bị skip dù build đã thành công.
     if: always() && needs.build.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       pages: write
       id-token: write

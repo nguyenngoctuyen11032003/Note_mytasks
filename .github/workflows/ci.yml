@@ -1,4 +1,6 @@
 # Kiểm tra mọi Pull Request (và được deploy.yml gọi lại trước khi deploy).
+# Push lên main không có trigger riêng ở đây: deploy.yml (on push main) gọi workflow này
+# qua workflow_call; thêm `push` sẽ chạy CI hai lần cho mỗi commit.
 # Không cần secret: web build dùng biến public, database chạy Supabase local bằng Docker.
 name: CI
 
@@ -17,7 +19,7 @@ concurrency:
 jobs:
   web:
     name: Web build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
@@ -40,9 +42,28 @@ jobs:
 
       - run: npm run build
 
+  functions:
+    name: Edge Functions type-check (Deno)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.6
+          cache: true
+          # Chưa có deno.lock → khoá cache theo mã nguồn function.
+          cache-hash: ${{ hashFiles('supabase/functions/**/*.ts') }}
+
+      # Unit test của lib.ts chạy trong `npm test` (vitest); job này bắt lỗi kiểu/import
+      # phía Deno (npm: specifier, Deno.* API) mà vitest không thấy.
+      - name: Type-check every function entrypoint
+        run: deno check supabase/functions/*/index.ts
+
   database:
     name: Database migrations (local)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
