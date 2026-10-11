@@ -4,13 +4,19 @@ import {
   MAX_DISHES,
   MAX_IMAGE_BYTES,
   base64DecodedBytes,
+  DEFAULT_GEMINI_MODEL,
+  SYSTEM_PROMPT,
   buildAnthropicRequest,
+  buildGeminiRequest,
   buildUserText,
   clampNumber,
   cleanText,
   extractJson,
+  geminiBlocked,
+  geminiResponseText,
   parseImageDataUrl,
   parseRequestBody,
+  pickProvider,
   responseText,
   sanitizeDish,
   sanitizeResult,
@@ -256,5 +262,43 @@ describe('sanitizeDish: nutrition consistency', () => {
     expect(SYSTEM_PROMPT).toMatch(/4×protein \+ 4×carbs \+ 9×fat/);
     expect(SYSTEM_PROMPT).toMatch(/bát cơm trắng ~150–200 g/);
     expect(SYSTEM_PROMPT).toMatch(/"grams" luôn > 0/);
+  });
+});
+
+describe('Gemini provider', () => {
+  it('pickProvider: explicit choice when its key exists, else Anthropic, else Gemini', () => {
+    expect(pickProvider({ geminiKey: 'g' })).toBe('gemini');
+    expect(pickProvider({ anthropicKey: 'a' })).toBe('anthropic');
+    expect(pickProvider({ anthropicKey: 'a', geminiKey: 'g' })).toBe('anthropic');
+    expect(pickProvider({ provider: ' Gemini ', anthropicKey: 'a', geminiKey: 'g' })).toBe('gemini');
+    expect(pickProvider({ provider: 'gemini', anthropicKey: 'a' })).toBe('anthropic');
+    expect(pickProvider({ anthropicKey: '  ', geminiKey: '' })).toBeNull();
+    expect(pickProvider({})).toBeNull();
+  });
+
+  it('buildGeminiRequest: inline image + prompt, JSON mode', () => {
+    const req = buildGeminiRequest({ mediaType: 'image/png', data: 'QUJD', hint: 'phở', mode: 'live' });
+    expect(req.systemInstruction.parts[0].text).toBe(SYSTEM_PROMPT);
+    const [img, text] = req.contents[0].parts;
+    expect(img.inlineData).toEqual({ mimeType: 'image/png', data: 'QUJD' });
+    expect(text.text).toContain('phở');
+    expect(text.text).toContain('quét nhanh');
+    expect(req.generationConfig.responseMimeType).toBe('application/json');
+    expect(DEFAULT_GEMINI_MODEL).toMatch(/^gemini-/);
+  });
+
+  it('geminiResponseText joins answer parts and skips thoughts', () => {
+    const res = { candidates: [{ content: { parts: [{ text: 'nghĩ…', thought: true }, { text: '{"is_food":' }, { text: 'true}' }] } }] };
+    expect(geminiResponseText(res)).toBe('{"is_food":true}');
+    expect(extractJson(geminiResponseText(res))).toEqual({ is_food: true });
+    expect(geminiResponseText({})).toBe('');
+    expect(geminiResponseText(null)).toBe('');
+  });
+
+  it('geminiBlocked detects prompt blocks and safety stops', () => {
+    expect(geminiBlocked({ promptFeedback: { blockReason: 'SAFETY' } })).toBe(true);
+    expect(geminiBlocked({ candidates: [{ finishReason: 'SAFETY' }] })).toBe(true);
+    expect(geminiBlocked({ candidates: [{ finishReason: 'STOP' }] })).toBe(false);
+    expect(geminiBlocked(null)).toBe(false);
   });
 });

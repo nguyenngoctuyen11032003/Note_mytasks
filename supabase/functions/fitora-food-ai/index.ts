@@ -8,18 +8,26 @@
 //
 // Flow: validate payload -> auth.getUser() with the caller's JWT -> consume the daily
 // quota via RPC fit_ai_quota_consume (runs as the caller, never service_role)
-// -> Claude vision (JSON only) -> extract + sanitize.
+// -> Claude or Gemini vision (JSON only) -> extract + sanitize.
 //
-// Secrets (supabase secrets set …): ANTHROPIC_API_KEY (required),
-// FITORA_AI_MODEL (optional), FITORA_AI_DAILY_LIMIT (optional, default 40).
+// Secrets (supabase secrets set …): ANTHROPIC_API_KEY and/or GEMINI_API_KEY (one is
+// required; Gemini has a free tier), FITORA_AI_PROVIDER (optional: anthropic | gemini,
+// used when both keys exist), FITORA_AI_MODEL (optional Claude model), GEMINI_MODEL
+// (optional, default gemini-flash-latest), FITORA_AI_DAILY_LIMIT (optional, default 40).
 // SUPABASE_URL / SUPABASE_ANON_KEY are injected by the platform.
 // Never log the image, the hint or any key.
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import {
+  type AiProvider,
   buildAnthropicRequest,
+  buildGeminiRequest,
+  DEFAULT_GEMINI_MODEL,
   type ErrorCode,
   extractJson,
+  geminiBlocked,
+  geminiResponseText,
   parseRequestBody,
+  pickProvider,
   responseText,
   sanitizeResult,
   supportsDefaultFallback,
@@ -101,6 +109,57 @@ async function callClaude(apiKey: string, payload: Record<string, unknown>, mode
   return { ok: true, value };
 }
 
+async function callGemini(apiKey: string, payload: Record<string, unknown>, model: string): Promise<AiCall> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), AI_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+        body: JSON.stringify(payload),
+        signal: ctrl.signal,
+      },
+    );
+  } catch (e) {
+    const aborted = e instanceof Error && e.name === 'AbortError';
+    console.error('gemini fetch failed:', aborted ? 'timeout' : e instanceof Error ? e.name : 'unknown');
+    return aborted
+      ? { ok: false, status: 503, message: 'Dịch vụ AI phản hồi quá lâu. Vui lòng thử lại.' }
+      : { ok: false, status: 502, message: 'Không kết nối được dịch vụ AI. Vui lòng thử lại.' };
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!res.ok) {
+    const detail = (await res.text().catch(() => '')).slice(0, 300);
+    console.error('gemini error', res.status, detail);
+    if (res.status === 429) {
+      // Free tier: per-minute / per-day request caps.
+      return { ok: false, status: 503, message: 'AI miễn phí đang hết lượt tạm thời. Vui lòng thử lại sau ít phút.' };
+    }
+    if (res.status >= 500) {
+      return { ok: false, status: 503, message: 'Dịch vụ AI đang quá tải. Vui lòng thử lại sau ít phút.' };
+    }
+    return { ok: false, status: 502, message: 'Không gọi được dịch vụ AI. Vui lòng thử lại.' };
+  }
+
+  const msg = await res.json().catch(() => null);
+  if (!msg) return { ok: false, status: 502, message: 'AI trả về dữ liệu không hợp lệ. Vui lòng thử lại.' };
+  if (geminiBlocked(msg)) {
+    console.error('gemini blocked the request');
+    return { ok: false, status: 502, message: 'AI không phân tích được ảnh này. Hãy thử chụp lại rõ hơn.' };
+  }
+  const value = extractJson(geminiResponseText(msg));
+  if (!value) {
+    console.error('gemini returned unparsable output, finishReason =', (msg as { candidates?: { finishReason?: unknown }[] }).candidates?.[0]?.finishReason);
+    return { ok: false, status: 502, message: 'AI trả về dữ liệu không hợp lệ. Vui lòng thử lại.' };
+  }
+  return { ok: true, value };
+}
+
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS });
   if (req.method !== 'POST') return fail(405, 'bad_request', 'Chỉ hỗ trợ phương thức POST.');
@@ -125,11 +184,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (!parsed.ok) return fail(400, 'bad_request', parsed.message);
 
   // ---- environment (checked before consuming quota so a misconfig never burns a scan)
-  const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
+  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
+  const geminiKey = Deno.env.get('GEMINI_API_KEY');
+  const provider: AiProvider | null = pickProvider({
+    provider: Deno.env.get('FITORA_AI_PROVIDER'), anthropicKey, geminiKey,
+  });
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
-  if (!apiKey || !supabaseUrl || !anonKey) {
-    console.error('missing env', { anthropic: !!apiKey, url: !!supabaseUrl, anon: !!anonKey });
+  if (!provider || !supabaseUrl || !anonKey) {
+    console.error('missing env', { anthropic: !!anthropicKey, gemini: !!geminiKey, url: !!supabaseUrl, anon: !!anonKey });
     return fail(503, 'ai_unavailable', 'Tính năng AI chưa được cấu hình. Vui lòng thử lại sau.');
   }
 
@@ -161,11 +224,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   // ---- AI
-  const model = (Deno.env.get('FITORA_AI_MODEL') ?? '').trim() || DEFAULT_MODEL;
-  const payload = buildAnthropicRequest({
-    model, mediaType: parsed.mediaType, data: parsed.data, hint: parsed.hint, mode: parsed.mode,
-  });
-  const ai = await callClaude(apiKey, payload, model);
+  const image = { mediaType: parsed.mediaType, data: parsed.data, hint: parsed.hint, mode: parsed.mode };
+  let ai: AiCall;
+  if (provider === 'gemini') {
+    const model = (Deno.env.get('GEMINI_MODEL') ?? '').trim() || DEFAULT_GEMINI_MODEL;
+    ai = await callGemini(geminiKey!, buildGeminiRequest(image), model);
+  } else {
+    const model = (Deno.env.get('FITORA_AI_MODEL') ?? '').trim() || DEFAULT_MODEL;
+    ai = await callClaude(anthropicKey!, buildAnthropicRequest({ model, ...image }), model);
+  }
   if (!ai.ok) return fail(ai.status, 'ai_unavailable', ai.message);
 
   const result = sanitizeResult(ai.value);

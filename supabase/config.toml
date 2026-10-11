@@ -398,8 +398,9 @@ deno_version = 2
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
-# Fitora: AI food recognition (Claude vision). Callers must send a user JWT.
-# Secrets: ANTHROPIC_API_KEY (required), FITORA_AI_MODEL, FITORA_AI_DAILY_LIMIT — see docs/DEPLOY.md.
+# Fitora: AI food recognition (Claude or Gemini vision). Callers must send a user JWT.
+# Secrets: GEMINI_API_KEY (free tier) and/or ANTHROPIC_API_KEY (one required), FITORA_AI_PROVIDER,
+# GEMINI_MODEL, FITORA_AI_MODEL, FITORA_AI_DAILY_LIMIT — see docs/DEPLOY.md.
 [functions.fitora-food-ai]
 enabled = true
 verify_jwt = true

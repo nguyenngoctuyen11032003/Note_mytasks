@@ -133,12 +133,22 @@ Auth sẽ xóa luôn dữ liệu `fit_*` (`on delete cascade`).
 
 ### Secrets của Edge Function (đặt một lần, chạy local)
 
-Khóa AI **không bao giờ** nằm trong frontend hay GitHub; chỉ là Supabase secret:
+Khóa AI **không bao giờ** nằm trong frontend hay GitHub; chỉ là Supabase secret. Cần **một** trong hai khóa:
+
+- `GEMINI_API_KEY`: **miễn phí**, tạo ở https://aistudio.google.com/apikey (gói free giới hạn lượt/phút và lượt/ngày;
+  Google có thể dùng dữ liệu gửi lên gói free để cải thiện sản phẩm).
+- `ANTHROPIC_API_KEY`: trả phí, tạo ở https://console.anthropic.com/settings/keys.
+
+Có cả hai thì mặc định dùng Anthropic; đặt `FITORA_AI_PROVIDER=gemini` để ép dùng Gemini. Đặt secret không cần deploy lại.
+Không dùng CLI thì vào Dashboard → **Edge Functions → Secrets → Add new secret**.
 
 ```bash
 npx supabase login
-npx supabase secrets set --project-ref <project-ref> ANTHROPIC_API_KEY=<khóa Anthropic>
+npx supabase secrets set --project-ref <project-ref> GEMINI_API_KEY=<khóa Gemini>          # miễn phí
+# hoặc: npx supabase secrets set --project-ref <project-ref> ANTHROPIC_API_KEY=<khóa Anthropic>
 # Tùy chọn:
+npx supabase secrets set --project-ref <project-ref> FITORA_AI_PROVIDER=gemini             # khi có cả hai khóa
+npx supabase secrets set --project-ref <project-ref> GEMINI_MODEL=gemini-flash-latest      # mặc định gemini-flash-latest
 npx supabase secrets set --project-ref <project-ref> FITORA_AI_MODEL=claude-sonnet-5-5      # mặc định claude-sonnet-5-5
 npx supabase secrets set --project-ref <project-ref> FITORA_AI_DAILY_LIMIT=40               # lượt quét AI / người / ngày
 ```
@@ -148,7 +158,7 @@ của người dùng (không dùng `service_role`), vượt hạn mức → HTTP
 
 ### Deploy function
 
-Job `functions` trong `deploy.yml` chạy `supabase functions deploy fitora-food-ai --project-ref $SUPABASE_PROJECT_ID`
+Job `functions` trong `deploy.yml` chạy `supabase functions deploy --project-ref $SUPABASE_PROJECT_ID` (mọi function)
 khi `supabase/functions/**` thay đổi (sau `migrate`, cần duyệt environment `production`, chỉ dùng secret
 `SUPABASE_ACCESS_TOKEN` + variable `SUPABASE_PROJECT_ID` đã có). Chạy tay: **Actions → Deploy → Run workflow**, tick
 `functions`. Job này bị bỏ qua thì `build` / `pages` của Note_mytasks vẫn chạy bình thường.
@@ -165,7 +175,8 @@ Supabase chỉ chấp nhận `redirectTo` nằm trong danh sách trên.
 
 | Triệu chứng (Fitora) | Nguyên nhân / cách xử lý |
 |---|---|
-| Quét AI báo "chưa được cấu hình" (503 `ai_unavailable`) | Chưa `supabase secrets set ANTHROPIC_API_KEY` |
+| Quét AI báo "chưa được cấu hình" (503 `ai_unavailable`) | Chưa đặt secret `GEMINI_API_KEY` (miễn phí) hoặc `ANTHROPIC_API_KEY` |
 | Quét AI 404 / CORS lỗi | Function chưa deploy → chạy workflow với `functions` |
+| Quét AI báo "AI miễn phí đang hết lượt tạm thời" | Gemini free tier chạm giới hạn lượt/phút hoặc lượt/ngày → đợi rồi thử lại |
 | Link email từ Fitora mở về Note_mytasks | URL Fitora chưa có trong Redirect URLs |
 | `relation "public.fit_profiles" does not exist` | Migration 001400 chưa được `db push` |

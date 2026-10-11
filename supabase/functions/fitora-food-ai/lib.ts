@@ -1,4 +1,4 @@
-// Fitora food AI — pure helpers (no Deno / network APIs) so they can be unit-tested
+// Fitora food AI (Claude or Gemini) — pure helpers (no Deno / network APIs) so they can be unit-tested
 // from Node (tests/functions/fitora_food_ai.test.js). Contract: Fitora/docs/PLAN.md §3.
 
 export type ImageMime = 'image/jpeg' | 'image/png' | 'image/webp';
@@ -343,6 +343,70 @@ export function buildAnthropicRequest(opts: {
     },
     ...(supportsDefaultFallback(opts.model) ? { fallbacks: 'default' } : {}),
   };
+}
+
+// ---------------------------------------------------------------- provider
+export type AiProvider = 'anthropic' | 'gemini';
+
+/** Free-tier friendly default; the alias always points at the current Flash model. */
+export const DEFAULT_GEMINI_MODEL = 'gemini-flash-latest';
+
+/**
+ * Pick the AI backend from the configured secrets. FITORA_AI_PROVIDER wins when its key
+ * exists; otherwise Anthropic if its key is set, else Gemini (free tier). null = none.
+ */
+export function pickProvider(env: {
+  provider?: string | null;
+  anthropicKey?: string | null;
+  geminiKey?: string | null;
+}): AiProvider | null {
+  const has = { anthropic: !!env.anthropicKey?.trim(), gemini: !!env.geminiKey?.trim() };
+  const wanted = (env.provider ?? '').trim().toLowerCase();
+  if ((wanted === 'anthropic' || wanted === 'gemini') && has[wanted]) return wanted;
+  if (has.anthropic) return 'anthropic';
+  if (has.gemini) return 'gemini';
+  return null;
+}
+
+/**
+ * Gemini generateContent request body (no secrets in here). JSON mode only, no
+ * responseSchema: the prompt fixes the shape and sanitizeResult() enforces it.
+ */
+export function buildGeminiRequest(opts: {
+  mediaType: ImageMime;
+  data: string;
+  hint: string;
+  mode: ScanMode;
+}): Record<string, unknown> {
+  return {
+    systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+    contents: [{
+      role: 'user',
+      parts: [
+        { inlineData: { mimeType: opts.mediaType, data: opts.data } },
+        { text: buildUserText(opts.hint, opts.mode) },
+      ],
+    }],
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
+  };
+}
+
+/** Text of the first candidate of a generateContent response ("thought" parts skipped). */
+export function geminiResponseText(res: unknown): string {
+  const parts = (res as { candidates?: { content?: { parts?: unknown } }[] })?.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts)) return '';
+  return parts
+    .filter((p) => p && typeof p === 'object' && !(p as { thought?: unknown }).thought)
+    .map((p) => String((p as { text?: unknown }).text ?? ''))
+    .join('');
+}
+
+/** True when Gemini blocked the prompt or stopped the answer for safety reasons. */
+export function geminiBlocked(res: unknown): boolean {
+  const r = res as { promptFeedback?: { blockReason?: unknown }; candidates?: { finishReason?: unknown }[] };
+  if (r?.promptFeedback?.blockReason) return true;
+  const reason = r?.candidates?.[0]?.finishReason;
+  return reason === 'SAFETY' || reason === 'PROHIBITED_CONTENT' || reason === 'BLOCKLIST';
 }
 
 /** Concatenate the text blocks of a Messages API response. */
