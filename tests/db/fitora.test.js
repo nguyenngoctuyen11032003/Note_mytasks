@@ -1,4 +1,5 @@
 // 001400 / 001500: Fitora tables, RLS, RPCs and the private `fitora` storage bucket.
+// 20261012000100: saved foods (source / photo / usage) and meal templates ("Bữa mẫu").
 import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createDb, createUser, asUser, asAnon, q } from './harness.js';
@@ -8,8 +9,9 @@ const num = (v) => (v === null || v === undefined ? v : Number(v));
 
 const TABLES = [
   'fit_profiles', 'fit_custom_foods', 'fit_meal_entries', 'fit_workout_templates', 'fit_workouts',
-  'fit_daily_logs', 'fit_body_measurements', 'fit_progress_photos', 'fit_ai_usage',
+  'fit_daily_logs', 'fit_body_measurements', 'fit_progress_photos', 'fit_ai_usage', 'fit_meal_templates',
 ];
+const TPL_ITEM = { name: 'Phở bò', quantity: 1, unit: 'bát', grams: 500, kcal: 450, protein_g: 25, carbs_g: 55, fat_g: 12, fiber_g: 2, custom_food_id: null };
 
 /** Minimal valid row per writable table (user_id comes from auth.uid()). */
 const sample = (uid) => ({
@@ -22,6 +24,7 @@ const sample = (uid) => ({
   fit_daily_logs: { log_date: '2026-03-10', water_ml: 500, steps: 4000 },
   fit_body_measurements: { measured_on: '2026-03-10', weight_kg: 61.5 },
   fit_progress_photos: { taken_on: '2026-03-10', storage_path: `${uid}/progress/x.webp` },
+  fit_meal_templates: { name: 'Sáng quen thuộc', meal: 'breakfast', items: JSON.stringify([TPL_ITEM]), total_kcal: 450 },
 });
 
 async function insertRow(tx, table, row) {
@@ -56,7 +59,10 @@ describe('001400 fitora schema: privileges & RLS', () => {
     for (const t of TABLES) {
       await expect(asAnon(db, (tx) => tx.query(`select * from public.${t}`)), t).rejects.toThrow(/permission denied/);
     }
-    for (const call of ["public.fit_day_summary('2026-03-10')", "public.fit_range_summary('2026-03-01', '2026-03-02')", 'public.fit_ai_quota_consume()']) {
+    for (const call of [
+      "public.fit_day_summary('2026-03-10')", "public.fit_range_summary('2026-03-01', '2026-03-02')", 'public.fit_ai_quota_consume()',
+      'public.fit_mark_food_used(array[gen_random_uuid()])', 'public.fit_mark_meal_template_used(gen_random_uuid())',
+    ]) {
       await expect(asAnon(db, (tx) => tx.query(`select ${call}`)), call).rejects.toThrow(/permission denied/);
     }
   });
@@ -94,18 +100,27 @@ describe('001400 fitora schema: privileges & RLS', () => {
   });
 
   it('does not touch objects of the other app (purely additive)', async () => {
-    const sql = readFileSync(new URL('../../supabase/migrations/20261009001400_fitora_schema.sql', import.meta.url), 'utf8');
-    const code = sql.replace(/--.*$/gm, '');
-    expect(code).not.toMatch(/\b(alter|drop)\s+(table|function|view|type|schema)\b(?![^;]*\bfit_)/i);
-    expect(code).not.toMatch(/\btruncate\b/i);
+    for (const f of ['20261009001400_fitora_schema.sql', '20261012000100_fitora_saved_foods.sql']) {
+      const sql = readFileSync(new URL(`../../supabase/migrations/${f}`, import.meta.url), 'utf8');
+      const code = sql.replace(/--.*$/gm, '');
+      expect(code, f).not.toMatch(/\b(alter|drop)\s+(table|function|view|type|schema)\b(?![^;]*\bfit_)/i);
+      expect(code, f).not.toMatch(/\btruncate\b/i);
+      expect(code, f).not.toMatch(/\bdrop\s+column\b/i);
+    }
+    // 000100 only ALTERs fit_* tables.
+    const add = readFileSync(new URL('../../supabase/migrations/20261012000100_fitora_saved_foods.sql', import.meta.url), 'utf8')
+      .replace(/--.*$/gm, '');
+    const altered = [...add.matchAll(/\balter\s+table\s+([\w.]+)/gi)].map((m) => m[1]);
+    expect(altered.length).toBeGreaterThan(0);
+    for (const t of altered) expect(t).toMatch(/^public\.fit_/);
   });
 
   it('is idempotent', async () => {
-    for (const f of ['20261009001400_fitora_schema.sql', '20261009001500_fitora_storage.sql']) {
+    for (const f of ['20261009001400_fitora_schema.sql', '20261009001500_fitora_storage.sql', '20261012000100_fitora_saved_foods.sql']) {
       await db.exec(readFileSync(new URL(`../../supabase/migrations/${f}`, import.meta.url), 'utf8'));
     }
     const { rows } = await db.query("select count(*)::int n from pg_policies where schemaname = 'public' and tablename like 'fit\\_%'");
-    expect(rows[0].n).toBe(8 * 4 + 1);
+    expect(rows[0].n).toBe(9 * 4 + 1);
   });
 });
 
@@ -315,7 +330,9 @@ describe('001400 RPCs', () => {
              has_function_privilege('authenticated', p.oid, 'execute') as auth_x,
              exists (select 1 from aclexplode(p.proacl) a where a.grantee = 0 and a.privilege_type = 'EXECUTE') as public_x
         from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname like 'fit\\_%'`);
-    expect(rows.map((r) => r.proname).sort()).toEqual(['fit_ai_quota_consume', 'fit_day_summary', 'fit_range_summary']);
+    expect(rows.map((r) => r.proname).sort()).toEqual([
+      'fit_ai_quota_consume', 'fit_day_summary', 'fit_mark_food_used', 'fit_mark_meal_template_used', 'fit_range_summary',
+    ]);
     for (const r of rows) {
       expect(r.prosecdef, r.proname).toBe(r.proname === 'fit_ai_quota_consume');
       expect(r.proconfig, r.proname).toContain('search_path=""');
@@ -366,5 +383,113 @@ describe('001500 fitora storage', () => {
     await expect(asAnon(db, (tx) => put(tx, 'fitora', `${a}/meals/anon.webp`))).rejects.toThrow(/row-level security/);
     const seen = await asAnon(db, (tx) => tx.query("select 1 from storage.objects where bucket_id = 'fitora'"));
     expect(seen.rows).toHaveLength(0);
+  });
+});
+
+describe('20261012000100 saved foods & meal templates', () => {
+  let u, v;
+  beforeAll(async () => {
+    u = await createUser(db);
+    v = await createUser(db);
+  });
+
+  it('fit_custom_foods gets source / photo / usage / default meal with safe defaults', async () => {
+    const f = await ins(u, 'fit_custom_foods', { name: 'Bún chả', serving_grams: 350, kcal_100g: 160 });
+    expect(f).toMatchObject({ source: 'manual', photo_path: null, use_count: 0, last_used_at: null, default_meal: null });
+    const ai = await ins(u, 'fit_custom_foods', {
+      name: 'Cơm tấm', serving_grams: 450, kcal_100g: 170, source: 'ai', photo_path: `${u}/meals/s.webp`, default_meal: 'lunch',
+    });
+    expect(ai).toMatchObject({ source: 'ai', photo_path: `${u}/meals/s.webp`, default_meal: 'lunch' });
+  });
+
+  it('rejects invalid saved-food values and foreign photo folders', async () => {
+    for (const row of [
+      { name: 'x', serving_grams: 10, source: 'scan' },
+      { name: 'x', serving_grams: 10, use_count: -1 },
+      { name: 'x', serving_grams: 10, default_meal: 'brunch' },
+      { name: 'x', serving_grams: 10, photo_path: `${v}/meals/x.webp` },
+      { name: 'x', serving_grams: 10, photo_path: 'x.webp' },
+    ]) {
+      await expect(ins(u, 'fit_custom_foods', row), JSON.stringify(row)).rejects.toThrow(/check constraint/);
+    }
+  });
+
+  it('fit_meal_templates validates name, meal and items', async () => {
+    const ok = await ins(u, 'fit_meal_templates', { name: 'Trưa văn phòng', items: JSON.stringify([TPL_ITEM, TPL_ITEM]) });
+    expect(ok).toMatchObject({ meal: null, use_count: 0, last_used_at: null });
+    expect(Number(ok.total_kcal)).toBe(0);
+    const big = Array.from({ length: 31 }, () => TPL_ITEM);
+    for (const row of [
+      { name: ' ', items: JSON.stringify([TPL_ITEM]) },
+      { name: 'x'.repeat(81), items: JSON.stringify([TPL_ITEM]) },
+      { name: 'x', meal: 'brunch', items: JSON.stringify([TPL_ITEM]) },
+      { name: 'x', items: '[]' },
+      { name: 'x', items: JSON.stringify(TPL_ITEM) },
+      { name: 'x', items: JSON.stringify(big) },
+      { name: 'x', items: JSON.stringify([{ ...TPL_ITEM, name: 'y'.repeat(40000) }]) },
+      { name: 'x', items: JSON.stringify([TPL_ITEM]), total_kcal: -1 },
+      { name: 'x', items: JSON.stringify([TPL_ITEM]), use_count: -1 },
+    ]) {
+      await expect(ins(u, 'fit_meal_templates', row), JSON.stringify(row).slice(0, 80)).rejects.toThrow(/check constraint|not-null/);
+    }
+    await expect(ins(u, 'fit_meal_templates', { name: 'x' })).rejects.toThrow(/not-null/);
+  });
+
+  it('fit_mark_food_used bumps only own rows atomically and returns them', async () => {
+    const f1 = await ins(u, 'fit_custom_foods', { name: 'Phở', serving_grams: 500 });
+    const f2 = await ins(u, 'fit_custom_foods', { name: 'Bánh mì', serving_grams: 150 });
+    const fv = await ins(v, 'fit_custom_foods', { name: 'V food', serving_grams: 100 });
+    const rows = await q(db, u, 'select id, use_count, last_used_at from public.fit_mark_food_used($1)', [[f1.id, f2.id, fv.id]]);
+    expect(rows.map((r) => r.id).sort()).toEqual([f1.id, f2.id].sort());
+    for (const r of rows) {
+      expect(r.use_count).toBe(1);
+      expect(r.last_used_at).not.toBeNull();
+    }
+    await q(db, u, 'select public.fit_mark_food_used($1)', [[f1.id]]);
+    const [again] = await q(db, u, 'select use_count from public.fit_custom_foods where id = $1', [f1.id]);
+    expect(again.use_count).toBe(2);
+    const [other] = await db.query('select use_count from public.fit_custom_foods where id = $1', [fv.id]).then((r) => r.rows);
+    expect(other.use_count).toBe(0);
+    // a meal remembers where the food was last logged; null keeps the previous one
+    const [m1] = await q(db, u, "select default_meal from public.fit_mark_food_used($1, 'dinner')", [[f2.id]]);
+    expect(m1.default_meal).toBe('dinner');
+    const [m2] = await q(db, u, 'select default_meal, use_count from public.fit_mark_food_used($1)', [[f2.id]]);
+    expect(m2).toEqual({ default_meal: 'dinner', use_count: 3 });
+    await expect(q(db, u, "select public.fit_mark_food_used($1, 'brunch')", [[f2.id]])).rejects.toThrow(/invalid meal/);
+    expect(await q(db, u, "select * from public.fit_mark_food_used('{}'::uuid[])")).toHaveLength(0);
+    expect(await q(db, u, 'select * from public.fit_mark_food_used(null)')).toHaveLength(0);
+    const many = Array.from({ length: 101 }, () => f1.id);
+    await expect(q(db, u, 'select public.fit_mark_food_used($1)', [many])).rejects.toThrow(/too many/);
+    await expect(asUser(db, '', (tx) => tx.query('select public.fit_mark_food_used($1)', [[f1.id]]))).rejects.toThrow(/not_authenticated/);
+  });
+
+  it('fit_mark_meal_template_used bumps only the own template', async () => {
+    const t = await ins(u, 'fit_meal_templates', sample(u).fit_meal_templates);
+    const tv = await ins(v, 'fit_meal_templates', sample(v).fit_meal_templates);
+    const [r] = await q(db, u, 'select use_count, last_used_at from public.fit_mark_meal_template_used($1)', [t.id]);
+    expect(r.use_count).toBe(1);
+    expect(r.last_used_at).not.toBeNull();
+    expect(await q(db, u, 'select * from public.fit_mark_meal_template_used($1)', [tv.id])).toHaveLength(0);
+    const [o] = (await db.query('select use_count from public.fit_meal_templates where id = $1', [tv.id])).rows;
+    expect(o.use_count).toBe(0);
+  });
+
+  it('a meal entry may share the saved food photo; deleting the food keeps the entry', async () => {
+    const photo = `${u}/meals/shared.webp`;
+    const f = await ins(u, 'fit_custom_foods', { name: 'Gỏi cuốn', serving_grams: 200, source: 'ai', photo_path: photo });
+    const m = await ins(u, 'fit_meal_entries', {
+      eaten_on: '2026-03-12', meal: 'snack', name: 'Gỏi cuốn', custom_food_id: f.id, source: 'custom', photo_path: photo,
+    });
+    await q(db, u, 'delete from public.fit_custom_foods where id = $1', [f.id]);
+    const [mm] = await q(db, u, 'select custom_food_id, photo_path from public.fit_meal_entries where id = $1', [m.id]);
+    expect(mm).toEqual({ custom_food_id: null, photo_path: photo });
+  });
+
+  it('recent-first index exists and existing rows were back-filled with defaults', async () => {
+    const { rows } = await db.query(
+      "select indexname from pg_indexes where schemaname = 'public' and indexname in ('fit_custom_foods_user_recent_idx', 'fit_meal_templates_user_recent_idx') order by 1");
+    expect(rows.map((r) => r.indexname)).toEqual(['fit_custom_foods_user_recent_idx', 'fit_meal_templates_user_recent_idx']);
+    const { rows: n } = await db.query("select count(*)::int n from public.fit_custom_foods where source is null or use_count is null");
+    expect(n[0].n).toBe(0);
   });
 });

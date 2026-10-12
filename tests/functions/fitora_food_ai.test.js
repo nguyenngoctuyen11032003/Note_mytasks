@@ -130,6 +130,15 @@ describe('sanitizing', () => {
     expect(clampNumber(Infinity, 0, 100, 3)).toBe(3);
   });
 
+  it('clampNumber reads numbers written with units (JSON mode without schema)', () => {
+    expect(clampNumber('450 kcal', 0, 5000)).toBe(450);
+    expect(clampNumber('120g', 0, 5000)).toBe(120);
+    expect(clampNumber('~0,8', 0, 1)).toBe(0.8);
+    expect(clampNumber('khoảng 3', 0, 10, 1)).toBe(1);
+    const d = sanitizeDish({ name: 'Cơm', quantity: '1', unit: 'bát', grams: '180 g', kcal: '250 kcal', carbs_g: '55g', protein_g: '5' });
+    expect(d).toMatchObject({ grams: 180, kcal: 250, carbs_g: 55, protein_g: 5 });
+  });
+
   it('cleanText collapses whitespace/control chars and truncates', () => {
     expect(cleanText('  a\n\tb\u0000c  ', 10)).toBe('a b c');
     expect(cleanText('x'.repeat(130), 120)).toHaveLength(120);
@@ -181,6 +190,9 @@ describe('sanitizing', () => {
     expect(sanitizeResult({ is_food: true, dishes: [{ name: '' }] }).is_food).toBe(false);
     expect(sanitizeResult({ is_food: false, dishes: [{ name: 'Phở' }] }).is_food).toBe(false);
     expect(sanitizeResult(null)).toEqual({ is_food: false, notes: '', dishes: [] });
+    // Flag missing but dishes present (Gemini JSON mode) → food; no dishes → not food.
+    expect(sanitizeResult({ dishes: [{ name: 'Phở', kcal: 400 }] }).is_food).toBe(true);
+    expect(sanitizeResult({ dishes: [] }).is_food).toBe(false);
   });
 });
 

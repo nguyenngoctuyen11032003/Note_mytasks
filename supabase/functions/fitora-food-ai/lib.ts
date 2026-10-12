@@ -171,7 +171,11 @@ export function extractJson(text: unknown): Record<string, unknown> | null {
 // ---------------------------------------------------------------- sanitizing
 const toNum = (v: unknown): number => {
   if (typeof v === 'number') return v;
-  if (typeof v === 'string' && v.trim() !== '') return Number(v.replace(',', '.'));
+  if (typeof v === 'string' && v.trim() !== '') {
+    // Models without a schema sometimes write units: "450 kcal", "120g", "~0,8".
+    const m = /^[~≈]?\s*(-?\d+(?:[.,]\d+)?)/.exec(v.trim());
+    return m ? Number(m[1].replace(',', '.')) : NaN;
+  }
   return NaN;
 };
 
@@ -246,7 +250,9 @@ export function sanitizeResult(raw: unknown): AiResult {
     .map(sanitizeDish)
     .filter((d): d is AiDish => d !== null)
     .slice(0, MAX_DISHES);
-  const said = r.is_food === true || r.is_food === 'true';
+  // A missing flag with real dishes (JSON mode without a schema) still counts as food;
+  // an explicit false always wins.
+  const said = r.is_food === true || r.is_food === 'true' || (r.is_food === undefined && dishes.length > 0);
   return { is_food: said && dishes.length > 0, notes: cleanText(r.notes, LIMITS.notes), dishes };
 }
 

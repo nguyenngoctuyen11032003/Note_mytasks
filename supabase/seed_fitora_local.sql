@@ -38,6 +38,7 @@ begin
   delete from public.fit_meal_entries      where user_id = v_uid;
   delete from public.fit_workouts          where user_id = v_uid;
   delete from public.fit_workout_templates where user_id = v_uid;
+  delete from public.fit_meal_templates    where user_id = v_uid;
   delete from public.fit_custom_foods      where user_id = v_uid;
   delete from public.fit_daily_logs        where user_id = v_uid;
   delete from public.fit_body_measurements where user_id = v_uid;
@@ -51,10 +52,29 @@ begin
   values (v_uid, 'male', date '1995-05-10', 172, 'moderate', 'lose', 'medium',
     78, 70, 2000, 156, 200, 62, false, 2500, 8000, now() - interval '14 days');
 
+  -- Saved foods ("Món của tôi"): a manual one used by the snack entries below
+  -- (7 times, last today), a dish saved from an AI scan, and one never used yet.
   insert into public.fit_custom_foods (user_id, name, brand, serving_label, serving_grams,
-    kcal_100g, protein_100g, carbs_100g, fat_100g, fiber_100g)
-  values (v_uid, 'Sữa chua Hy Lạp nhà làm', null, '1 hũ', 150, 97, 9, 4, 5, 0)
+    kcal_100g, protein_100g, carbs_100g, fat_100g, fiber_100g, source, use_count, last_used_at, default_meal)
+  values (v_uid, 'Sữa chua Hy Lạp nhà làm', null, '1 hũ', 150, 97, 9, 4, 5, 0, 'manual', 7, now() - interval '2 hours', 'snack')
   returning id into v_food;
+
+  insert into public.fit_custom_foods (user_id, name, brand, serving_label, serving_grams,
+    kcal_100g, protein_100g, carbs_100g, fat_100g, fiber_100g, source, use_count, last_used_at, default_meal)
+  values (v_uid, 'Bún bò Huế', null, '1 bát', 550, 98.2, 5.5, 11.8, 3.3, 0.5, 'ai', 3, now() - interval '1 day', 'lunch');
+
+  insert into public.fit_custom_foods (user_id, name, brand, serving_label, serving_grams,
+    kcal_100g, protein_100g, carbs_100g, fat_100g, fiber_100g, source)
+  values (v_uid, 'Bánh mì trứng ốp la', null, '1 ổ', 180, 245, 10, 30, 9.5, 1.5, 'manual');
+
+  -- A meal template ("Bữa mẫu") linking one saved food.
+  insert into public.fit_meal_templates (user_id, name, meal, items, total_kcal, use_count, last_used_at)
+  values (v_uid, 'Sáng quen thuộc', 'breakfast', jsonb_build_array(
+      jsonb_build_object('name', 'Phở bò', 'quantity', 1, 'unit', 'bát', 'grams', 500, 'kcal', 450,
+        'protein_g', 25, 'carbs_g', 55, 'fat_g', 12, 'fiber_g', 2, 'custom_food_id', null),
+      jsonb_build_object('name', 'Sữa chua Hy Lạp nhà làm', 'quantity', 1, 'unit', 'hũ', 'grams', 150, 'kcal', 145.5,
+        'protein_g', 13.5, 'carbs_g', 6, 'fat_g', 7.5, 'fiber_g', 0, 'custom_food_id', v_food)),
+    595.5, 2, now() - interval '3 days');
 
   insert into public.fit_workout_templates (user_id, name, category, activity, met, duration_min, notes)
   values (v_uid, 'Đẩy ngực – vai', 'gym', 'weight_training', 5.0, 60, 'Bench, OHP, dips')
