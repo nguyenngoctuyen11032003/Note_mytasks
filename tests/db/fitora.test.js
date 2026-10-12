@@ -1,5 +1,7 @@
 // 001400 / 001500: Fitora tables, RLS, RPCs and the private `fitora` storage bucket.
 // 20261012000100: saved foods (source / photo / usage) and meal templates ("Bữa mẫu").
+// 20261012000300: default_servings, name_key uniqueness, UTC day for the AI quota.
+// 20261012000400: capped AI quota refund, undo of a meal-template usage bump.
 import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createDb, createUser, asUser, asAnon, q } from './harness.js';
@@ -62,6 +64,8 @@ describe('001400 fitora schema: privileges & RLS', () => {
     for (const call of [
       "public.fit_day_summary('2026-03-10')", "public.fit_range_summary('2026-03-01', '2026-03-02')", 'public.fit_ai_quota_consume()',
       'public.fit_mark_food_used(array[gen_random_uuid()])', 'public.fit_mark_meal_template_used(gen_random_uuid())',
+      'public.fit_unmark_food_used(gen_random_uuid(), null, null)', 'public.fit_ai_quota_refund()',
+      'public.fit_unmark_meal_template_used(gen_random_uuid(), null)',
     ]) {
       await expect(asAnon(db, (tx) => tx.query(`select ${call}`)), call).rejects.toThrow(/permission denied/);
     }
@@ -100,7 +104,7 @@ describe('001400 fitora schema: privileges & RLS', () => {
   });
 
   it('does not touch objects of the other app (purely additive)', async () => {
-    for (const f of ['20261009001400_fitora_schema.sql', '20261012000100_fitora_saved_foods.sql']) {
+    for (const f of ['20261009001400_fitora_schema.sql', '20261012000100_fitora_saved_foods.sql', '20261012000200_fitora_unmark_food_used.sql', '20261012000300_fitora_saved_foods_hardening.sql', '20261012000400_fitora_refund_and_template_undo.sql']) {
       const sql = readFileSync(new URL(`../../supabase/migrations/${f}`, import.meta.url), 'utf8');
       const code = sql.replace(/--.*$/gm, '');
       expect(code, f).not.toMatch(/\b(alter|drop)\s+(table|function|view|type|schema)\b(?![^;]*\bfit_)/i);
@@ -116,7 +120,7 @@ describe('001400 fitora schema: privileges & RLS', () => {
   });
 
   it('is idempotent', async () => {
-    for (const f of ['20261009001400_fitora_schema.sql', '20261009001500_fitora_storage.sql', '20261012000100_fitora_saved_foods.sql']) {
+    for (const f of ['20261009001400_fitora_schema.sql', '20261009001500_fitora_storage.sql', '20261012000100_fitora_saved_foods.sql', '20261012000200_fitora_unmark_food_used.sql', '20261012000300_fitora_saved_foods_hardening.sql', '20261012000400_fitora_refund_and_template_undo.sql']) {
       await db.exec(readFileSync(new URL(`../../supabase/migrations/${f}`, import.meta.url), 'utf8'));
     }
     const { rows } = await db.query("select count(*)::int n from pg_policies where schemaname = 'public' and tablename like 'fit\\_%'");
@@ -332,9 +336,10 @@ describe('001400 RPCs', () => {
         from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname like 'fit\\_%'`);
     expect(rows.map((r) => r.proname).sort()).toEqual([
       'fit_ai_quota_consume', 'fit_day_summary', 'fit_mark_food_used', 'fit_mark_meal_template_used', 'fit_range_summary',
-    ]);
+      'fit_unmark_food_used', 'fit_ai_quota_refund', 'fit_unmark_meal_template_used',
+    ].sort());
     for (const r of rows) {
-      expect(r.prosecdef, r.proname).toBe(r.proname === 'fit_ai_quota_consume');
+      expect(r.prosecdef, r.proname).toBe(['fit_ai_quota_consume', 'fit_ai_quota_refund'].includes(r.proname));
       expect(r.proconfig, r.proname).toContain('search_path=""');
       expect(r.anon_x, r.proname).toBe(false);
       expect(r.public_x, r.proname).toBe(false);
@@ -463,6 +468,34 @@ describe('20261012000100 saved foods & meal templates', () => {
     await expect(asUser(db, '', (tx) => tx.query('select public.fit_mark_food_used($1)', [[f1.id]]))).rejects.toThrow(/not_authenticated/);
   });
 
+  it('fit_unmark_food_used reverses one bump (undo) for own rows only, never moving last_used_at forward', async () => {
+    const prev = '2026-03-01T08:00:00Z';
+    const f = await ins(u, 'fit_custom_foods', { name: 'Bún bò', serving_grams: 500, use_count: 3, last_used_at: prev, default_meal: 'breakfast' });
+    const [bumped] = await q(db, u, "select use_count, last_used_at, default_meal from public.fit_mark_food_used($1, 'dinner')", [[f.id]]);
+    expect(bumped.use_count).toBe(4);
+    expect(bumped.default_meal).toBe('dinner');
+    const [undone] = await q(db, u, 'select use_count, last_used_at, default_meal from public.fit_unmark_food_used($1, $2, $3)', [f.id, prev, 'breakfast']);
+    expect(undone.use_count).toBe(3);
+    expect(new Date(undone.last_used_at).toISOString()).toBe(new Date(prev).toISOString());
+    expect(undone.default_meal).toBe('breakfast');
+    // a "previous" timestamp later than the current one is ignored (cannot inflate recency)
+    const [fwd] = await q(db, u, 'select last_used_at from public.fit_unmark_food_used($1, $2, null)', [f.id, '2099-01-01T00:00:00Z']);
+    expect(new Date(fwd.last_used_at).toISOString()).toBe(new Date(prev).toISOString());
+    // a food whose first use is undone goes back to "never used"
+    const g = await ins(u, 'fit_custom_foods', { name: 'Chè', serving_grams: 200 });
+    await q(db, u, "select public.fit_mark_food_used($1, 'snack')", [[g.id]]);
+    const [g0] = await q(db, u, 'select use_count, last_used_at, default_meal from public.fit_unmark_food_used($1, null, null)', [g.id]);
+    expect(g0).toEqual({ use_count: 0, last_used_at: null, default_meal: null });
+    // never below 0, other users untouched, input validated, anon/unauth denied
+    expect(await q(db, u, 'select * from public.fit_unmark_food_used($1, null, null)', [g.id])).toHaveLength(0);
+    const fv = await ins(v, 'fit_custom_foods', { name: 'V', serving_grams: 100, use_count: 2, last_used_at: prev });
+    expect(await q(db, u, 'select * from public.fit_unmark_food_used($1, null, null)', [fv.id])).toHaveLength(0);
+    const [o] = (await db.query('select use_count from public.fit_custom_foods where id = $1', [fv.id])).rows;
+    expect(o.use_count).toBe(2);
+    await expect(q(db, u, "select public.fit_unmark_food_used($1, null, 'brunch')", [f.id])).rejects.toThrow(/invalid meal/);
+    await expect(asUser(db, '', (tx) => tx.query('select public.fit_unmark_food_used($1, null, null)', [f.id]))).rejects.toThrow(/not_authenticated/);
+  });
+
   it('fit_mark_meal_template_used bumps only the own template', async () => {
     const t = await ins(u, 'fit_meal_templates', sample(u).fit_meal_templates);
     const tv = await ins(v, 'fit_meal_templates', sample(v).fit_meal_templates);
@@ -491,5 +524,126 @@ describe('20261012000100 saved foods & meal templates', () => {
     expect(rows.map((r) => r.indexname)).toEqual(['fit_custom_foods_user_recent_idx', 'fit_meal_templates_user_recent_idx']);
     const { rows: n } = await db.query("select count(*)::int n from public.fit_custom_foods where source is null or use_count is null");
     expect(n[0].n).toBe(0);
+  });
+});
+
+describe('20261012000300 saved-foods hardening & AI quota day', () => {
+  let u, v;
+  beforeAll(async () => {
+    u = await createUser(db);
+    v = await createUser(db);
+  });
+
+  it('default_servings is optional and bounded', async () => {
+    const f = await ins(u, 'fit_custom_foods', { name: 'Bánh bao', serving_label: '1 cái', serving_grams: 150 });
+    expect(f.default_servings).toBeNull();
+    const g = await ins(u, 'fit_custom_foods', { name: 'Bánh bao 2', serving_label: '1 cái', serving_grams: 150, default_servings: 2.5 });
+    expect(Number(g.default_servings)).toBe(2.5);
+    for (const bad of [0, -1, 1000.01]) {
+      await expect(ins(u, 'fit_custom_foods', { name: 'x', serving_grams: 10, default_servings: bad }), String(bad)).rejects.toThrow(/check constraint/);
+    }
+  });
+
+  it('name_key is unique per user; NULL keys (older / hand-made foods) never collide', async () => {
+    await ins(u, 'fit_custom_foods', { name: 'Cơm tấm', serving_grams: 400, name_key: 'com tam' });
+    await expect(ins(u, 'fit_custom_foods', { name: 'COM TAM', serving_grams: 300, name_key: 'com tam' })).rejects.toThrow(/duplicate key|unique/);
+    // another user may have the same dish
+    await expect(ins(v, 'fit_custom_foods', { name: 'Cơm tấm', serving_grams: 400, name_key: 'com tam' })).resolves.toMatchObject({ name_key: 'com tam' });
+    // no key = no constraint (hand-made foods with the same name stay allowed)
+    await ins(u, 'fit_custom_foods', { name: 'Bún', serving_grams: 300 });
+    await ins(u, 'fit_custom_foods', { name: 'Bún', serving_grams: 350 });
+    for (const bad of ['', 'x'.repeat(121)]) {
+      await expect(ins(u, 'fit_custom_foods', { name: 'y', serving_grams: 10, name_key: bad })).rejects.toThrow(/check constraint/);
+    }
+  });
+
+  it('fit_ai_quota_consume counts the UTC day, not the (user-editable) profile time zone', async () => {
+    const w = await createUser(db);
+    const take = () => q(db, w, 'select public.fit_ai_quota_consume(3) ok').then((r) => r[0].ok);
+    const tz = (zone) => db.query('update public.profiles set timezone = $1 where id = $2', [zone, w]);
+    expect(await take()).toBe(true);
+    await tz('Etc/GMT+12');
+    expect(await take()).toBe(true);
+    await tz('Pacific/Kiritimati');
+    expect(await take()).toBe(true);
+    await tz('Asia/Ho_Chi_Minh');
+    expect(await take()).toBe(false); // 3 per UTC day, however often the zone is flipped
+    const rows = await q(db, w, 'select used_on::text d, count from public.fit_ai_usage');
+    expect(rows).toEqual([{ d: new Date().toISOString().slice(0, 10), count: 3 }]);
+  });
+});
+
+describe('20261012000400 AI quota refund & meal-template undo', () => {
+  const today = () => new Date().toISOString().slice(0, 10);
+  const consume = (uid, limit = 40) => q(db, uid, 'select public.fit_ai_quota_consume($1) ok', [limit]).then((r) => r[0].ok);
+  const refund = (uid) => q(db, uid, 'select public.fit_ai_quota_refund() ok').then((r) => r[0].ok);
+  const usage = (uid) => q(db, uid, 'select used_on::text d, count, refunded from public.fit_ai_usage');
+
+  it('a refund after a scan gives that scan back', async () => {
+    const u = await createUser(db);
+    expect(await consume(u)).toBe(true);
+    expect(await consume(u)).toBe(true);
+    expect(await refund(u)).toBe(true);
+    expect(await usage(u)).toEqual([{ d: today(), count: 1, refunded: 1 }]);
+  });
+
+  it('nothing to refund without a scan today (no row, or count already 0)', async () => {
+    const u = await createUser(db);
+    expect(await refund(u)).toBe(false);
+    expect(await usage(u)).toEqual([]);
+    expect(await consume(u)).toBe(true);
+    expect(await refund(u)).toBe(true);
+    expect(await refund(u)).toBe(false); // count is 0: never negative
+    expect(await usage(u)).toEqual([{ d: today(), count: 0, refunded: 1 }]);
+  });
+
+  it('refunds are capped at 10 per day, so calling the RPC directly cannot buy unlimited scans', async () => {
+    const u = await createUser(db);
+    for (let i = 0; i < 10; i++) {
+      expect(await consume(u, 1), `consume ${i}`).toBe(true);
+      expect(await refund(u), `refund ${i}`).toBe(true);
+    }
+    expect(await consume(u, 1)).toBe(true);
+    expect(await refund(u)).toBe(false); // 11th refund
+    expect(await consume(u, 1)).toBe(false); // the daily limit holds again
+    expect(await usage(u)).toEqual([{ d: today(), count: 1, refunded: 10 }]);
+  });
+
+  it('only the caller is refunded; anon is denied; the column stays read-only for clients', async () => {
+    const u = await createUser(db);
+    const w = await createUser(db);
+    expect(await consume(u)).toBe(true);
+    expect(await refund(w)).toBe(false);
+    expect(await usage(u)).toEqual([{ d: today(), count: 1, refunded: 0 }]);
+    await expect(asAnon(db, (tx) => tx.query('select public.fit_ai_quota_refund()'))).rejects.toThrow(/permission denied/);
+    await expect(asUser(db, u, (tx) => tx.query('update public.fit_ai_usage set refunded = 0'))).rejects.toThrow(/permission denied/);
+  });
+
+  it('fit_unmark_meal_template_used reverses one bump, never below 0, own rows only', async () => {
+    const u = await createUser(db);
+    const w = await createUser(db);
+    const t = await ins(u, 'fit_meal_templates', sample(u).fit_meal_templates);
+    const mark = () => q(db, u, 'select public.fit_mark_meal_template_used($1)', [t.id]);
+    const unmark = (uid, prev) => q(db, uid, 'select use_count, last_used_at from public.fit_unmark_meal_template_used($1, $2)', [t.id, prev]);
+    const state = async () => (await q(db, u, 'select use_count, last_used_at from public.fit_meal_templates where id = $1', [t.id]))[0];
+
+    await mark();
+    const first = await state();
+    await mark();
+    expect((await state()).use_count).toBe(2);
+    // B cannot touch A's template
+    expect(await unmark(w, first.last_used_at)).toEqual([]);
+    expect((await state()).use_count).toBe(2);
+    // undo of the 2nd log: back to the snapshot
+    expect(await unmark(u, first.last_used_at)).toEqual([{ use_count: 1, last_used_at: first.last_used_at }]);
+    // a snapshot LATER than the current value is ignored (never moved forward)
+    await mark();
+    const cur = await state();
+    await unmark(u, new Date(Date.parse(cur.last_used_at) + 3600e3).toISOString());
+    expect(await state()).toEqual({ use_count: 1, last_used_at: cur.last_used_at });
+    // last undo: count 0 and last_used_at cleared; one more is a no-op
+    expect(await unmark(u, first.last_used_at)).toEqual([{ use_count: 0, last_used_at: null }]);
+    expect(await unmark(u, null)).toEqual([]);
+    expect(await state()).toEqual({ use_count: 0, last_used_at: null });
   });
 });
