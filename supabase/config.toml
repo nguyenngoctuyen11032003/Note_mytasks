@@ -163,7 +163,12 @@ site_url = "http://localhost:5173"
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
 # Local dev only (Vite port). Production URLs are set in the Supabase dashboard — CI never runs
 # `supabase config push`, so these values are not copied to the hosted project.
-additional_redirect_urls = ["http://localhost:5173/**", "http://127.0.0.1:5173/**"]
+#   5173 = Note_mytasks/Fitora dev, 3000 = gym-for-beginners dev, 3100 = gym-for-beginners e2e.
+additional_redirect_urls = [
+  "http://localhost:5173/**", "http://127.0.0.1:5173/**",
+  "http://localhost:3000/**", "http://127.0.0.1:3000/**",
+  "http://localhost:3100/**", "http://127.0.0.1:3100/**",
+]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to auth.external_url.
