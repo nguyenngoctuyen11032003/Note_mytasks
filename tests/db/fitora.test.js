@@ -2,8 +2,10 @@
 // 20261012000100: saved foods (source / photo / usage) and meal templates ("Bữa mẫu").
 // 20261012000300: default_servings, name_key uniqueness, UTC day for the AI quota.
 // 20261012000400: capped AI quota refund, undo of a meal-template usage bump.
+// 20261012000500: fit_workouts.source / client_ref for sessions logged by the Vyora gym app.
 import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { createDb, createUser, asUser, asAnon, q } from './harness.js';
 
 let db, a, b;
@@ -104,7 +106,7 @@ describe('001400 fitora schema: privileges & RLS', () => {
   });
 
   it('does not touch objects of the other app (purely additive)', async () => {
-    for (const f of ['20261009001400_fitora_schema.sql', '20261012000100_fitora_saved_foods.sql', '20261012000200_fitora_unmark_food_used.sql', '20261012000300_fitora_saved_foods_hardening.sql', '20261012000400_fitora_refund_and_template_undo.sql']) {
+    for (const f of ['20261009001400_fitora_schema.sql', '20261012000100_fitora_saved_foods.sql', '20261012000200_fitora_unmark_food_used.sql', '20261012000300_fitora_saved_foods_hardening.sql', '20261012000400_fitora_refund_and_template_undo.sql', '20261012000500_fitora_workout_source.sql']) {
       const sql = readFileSync(new URL(`../../supabase/migrations/${f}`, import.meta.url), 'utf8');
       const code = sql.replace(/--.*$/gm, '');
       expect(code, f).not.toMatch(/\b(alter|drop)\s+(table|function|view|type|schema)\b(?![^;]*\bfit_)/i);
@@ -120,7 +122,7 @@ describe('001400 fitora schema: privileges & RLS', () => {
   });
 
   it('is idempotent', async () => {
-    for (const f of ['20261009001400_fitora_schema.sql', '20261009001500_fitora_storage.sql', '20261012000100_fitora_saved_foods.sql', '20261012000200_fitora_unmark_food_used.sql', '20261012000300_fitora_saved_foods_hardening.sql', '20261012000400_fitora_refund_and_template_undo.sql']) {
+    for (const f of ['20261009001400_fitora_schema.sql', '20261009001500_fitora_storage.sql', '20261012000100_fitora_saved_foods.sql', '20261012000200_fitora_unmark_food_used.sql', '20261012000300_fitora_saved_foods_hardening.sql', '20261012000400_fitora_refund_and_template_undo.sql', '20261012000500_fitora_workout_source.sql']) {
       await db.exec(readFileSync(new URL(`../../supabase/migrations/${f}`, import.meta.url), 'utf8'));
     }
     const { rows } = await db.query("select count(*)::int n from pg_policies where schemaname = 'public' and tablename like 'fit\\_%'");
@@ -645,5 +647,78 @@ describe('20261012000400 AI quota refund & meal-template undo', () => {
     expect(await unmark(u, first.last_used_at)).toEqual([{ use_count: 0, last_used_at: null }]);
     expect(await unmark(u, null)).toEqual([]);
     expect(await state()).toEqual({ use_count: 0, last_used_at: null });
+  });
+});
+
+describe('20261012000500 fit_workouts.source / client_ref (Vyora gym app)', () => {
+  const gymRow = (ref, over = {}) => ({
+    workout_on: '2026-03-16', start_time: '18:30', category: 'gym', activity: 'weight_training', title: 'Ngực, vai và tay sau',
+    met: 3.5, duration_min: 60, kcal: 257, status: 'done', notes: '6/6 bài · Gym app', source: 'gym', client_ref: ref, ...over,
+  });
+  // Exactly what supabase-js sends for upsert(row, { onConflict: 'user_id,client_ref', ignoreDuplicates: true }).
+  const gymInsert = (uid, row) =>
+    asUser(db, uid, async (tx) => {
+      const cols = Object.keys(row);
+      const sql = `insert into public.fit_workouts (${cols.join(', ')}) values (${cols.map((_, i) => `$${i + 1}`).join(', ')})
+                   on conflict (user_id, client_ref) do nothing returning id`;
+      return (await tx.query(sql, Object.values(row))).rows;
+    });
+
+  it('existing and Fitora-inserted rows default to source fitora with no client_ref', async () => {
+    const u = await createUser(db);
+    const w = await ins(u, 'fit_workouts', sample(u).fit_workouts);
+    expect(w.source).toBe('fitora');
+    expect(w.client_ref).toBeNull();
+    // many Fitora rows: NULL client_refs never collide
+    await ins(u, 'fit_workouts', sample(u).fit_workouts);
+    expect((await q(db, u, "select count(*)::int n from public.fit_workouts where source = 'fitora'"))[0].n).toBe(2);
+  });
+
+  it('retrying the same gym session inserts once and never overwrites a row edited in Fitora', async () => {
+    const u = await createUser(db);
+    const ref = randomUUID();
+    expect(await gymInsert(u, gymRow(ref))).toHaveLength(1);
+    // Fitora edits the session (user fixes the duration)
+    await q(db, u, 'update public.fit_workouts set duration_min = 50, kcal = 214 where client_ref = $1', [ref]);
+    // lost-response retry from the gym outbox
+    expect(await gymInsert(u, gymRow(ref))).toHaveLength(0);
+    const rows = await q(db, u, 'select duration_min, kcal::float8 kcal, source from public.fit_workouts where client_ref = $1', [ref]);
+    expect(rows).toEqual([{ duration_min: 50, kcal: 214, source: 'gym' }]);
+  });
+
+  it('client_ref is unique per user, not globally', async () => {
+    const u = await createUser(db);
+    const w = await createUser(db);
+    const ref = randomUUID();
+    expect(await gymInsert(u, gymRow(ref))).toHaveLength(1);
+    expect(await gymInsert(w, gymRow(ref))).toHaveLength(1);
+    await expect(ins(u, 'fit_workouts', gymRow(ref))).rejects.toThrow(/fit_workouts_user_client_ref_key/);
+  });
+
+  it('rejects an unknown source and a gym row without client_ref', async () => {
+    const u = await createUser(db);
+    await expect(ins(u, 'fit_workouts', gymRow(randomUUID(), { source: 'strava' }))).rejects.toThrow(/fit_workouts_source_check/);
+    await expect(ins(u, 'fit_workouts', gymRow(null))).rejects.toThrow(/fit_workouts_gym_client_ref_check/);
+  });
+
+  it('gym rows are private to their owner and cannot be forged for someone else', async () => {
+    const u = await createUser(db);
+    const w = await createUser(db);
+    const ref = randomUUID();
+    await gymInsert(u, gymRow(ref));
+    expect(await q(db, w, 'select 1 from public.fit_workouts where client_ref = $1', [ref])).toEqual([]);
+    expect((await asUser(db, w, (tx) => tx.query('delete from public.fit_workouts where client_ref = $1', [ref]))).affectedRows).toBe(0);
+    await expect(gymInsert(w, gymRow(randomUUID(), { user_id: u }))).rejects.toThrow(/row-level security/);
+  });
+
+  it('done gym sessions count as workout_kcal in fit_day_summary and fit_range_summary', async () => {
+    const u = await createUser(db);
+    await gymInsert(u, gymRow(randomUUID()));
+    await gymInsert(u, gymRow(randomUUID(), { activity: 'badminton', category: 'team_sport', title: 'Cầu lông · Thi đấu', met: 7, duration_min: 45, kcal: 386 }));
+    await ins(u, 'fit_workouts', { ...sample(u).fit_workouts, workout_on: '2026-03-16', kcal: 100 });
+    const [{ s }] = await q(db, u, "select public.fit_day_summary('2026-03-16') s");
+    expect(s.workout_kcal).toBe(257 + 386 + 100);
+    const [r] = await q(db, u, "select workout_kcal::float8 k from public.fit_range_summary('2026-03-16', '2026-03-16')");
+    expect(r.k).toBe(743);
   });
 });
