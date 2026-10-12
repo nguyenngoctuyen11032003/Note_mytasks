@@ -8,7 +8,8 @@
 //
 // Flow: validate payload -> auth.getUser() with the caller's JWT -> consume the daily
 // quota via RPC fit_ai_quota_consume (runs as the caller, never service_role)
-// -> Claude or Gemini vision (JSON only) -> extract + sanitize.
+// -> Claude or Gemini vision (JSON only) -> extract + sanitize. When the provider itself
+// fails the scan is refunded (fit_ai_quota_refund, best-effort); not_food answers still count.
 //
 // Secrets (supabase secrets set …): ANTHROPIC_API_KEY and/or GEMINI_API_KEY (one is
 // required; Gemini has a free tier), FITORA_AI_PROVIDER (optional: anthropic | gemini,
@@ -109,28 +110,47 @@ async function callClaude(apiKey: string, payload: Record<string, unknown>, mode
   return { ok: true, value };
 }
 
-async function callGemini(apiKey: string, payload: Record<string, unknown>, model: string): Promise<AiCall> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), AI_TIMEOUT_MS);
+/**
+ * `plainPayload` is the same request without the response schema: when Gemini answers 400
+ * (it rejected the schema for this model) the call is repeated once in plain JSON mode, so a
+ * schema problem never takes the scanner down.
+ */
+async function callGemini(
+  apiKey: string,
+  payload: Record<string, unknown>,
+  model: string,
+  plainPayload?: Record<string, unknown>,
+): Promise<AiCall> {
+  const post = async (body: Record<string, unknown>): Promise<Response> => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), AI_TIMEOUT_MS);
+    try {
+      return await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+          body: JSON.stringify(body),
+          signal: ctrl.signal,
+        },
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+  };
   let res: Response;
   try {
-    res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
-        body: JSON.stringify(payload),
-        signal: ctrl.signal,
-      },
-    );
+    res = await post(payload);
+    if (res.status === 400 && plainPayload) {
+      console.error('gemini rejected the schema, retrying in plain JSON mode:', (await res.text().catch(() => '')).slice(0, 200));
+      res = await post(plainPayload);
+    }
   } catch (e) {
     const aborted = e instanceof Error && e.name === 'AbortError';
     console.error('gemini fetch failed:', aborted ? 'timeout' : e instanceof Error ? e.name : 'unknown');
     return aborted
       ? { ok: false, status: 503, message: 'Dịch vụ AI phản hồi quá lâu. Vui lòng thử lại.' }
       : { ok: false, status: 502, message: 'Không kết nối được dịch vụ AI. Vui lòng thử lại.' };
-  } finally {
-    clearTimeout(timer);
   }
 
   if (!res.ok) {
@@ -228,12 +248,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
   let ai: AiCall;
   if (provider === 'gemini') {
     const model = (Deno.env.get('GEMINI_MODEL') ?? '').trim() || DEFAULT_GEMINI_MODEL;
-    ai = await callGemini(geminiKey!, buildGeminiRequest(image), model);
+    ai = await callGemini(geminiKey!, buildGeminiRequest(image), model, buildGeminiRequest({ ...image, schema: false }));
   } else {
     const model = (Deno.env.get('FITORA_AI_MODEL') ?? '').trim() || DEFAULT_MODEL;
     ai = await callClaude(anthropicKey!, buildAnthropicRequest({ model, ...image }), model);
   }
-  if (!ai.ok) return fail(ai.status, 'ai_unavailable', ai.message);
+  if (!ai.ok) {
+    // The provider failed (429 / 5xx / timeout / unparsable): the user got nothing, so the
+    // scan is given back. Best-effort: never let the refund mask the real error. A missing
+    // function (older database) or a refused refund (daily refund cap) is simply ignored.
+    try {
+      await supabase.rpc('fit_ai_quota_refund');
+    } catch {
+      /* ignore */
+    }
+    return fail(ai.status, 'ai_unavailable', ai.message);
+  }
 
   const result = sanitizeResult(ai.value);
   if (!result.is_food) {

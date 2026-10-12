@@ -148,7 +148,7 @@ describe('sanitizing', () => {
   it('sanitizeDish clamps to fit_meal_entries limits', () => {
     const d = sanitizeDish({
       name: '  Phở bò  ', ingredients: ['bánh phở', '', 3, 'thịt bò'], quantity: 1, unit: 'bát',
-      grams: 1e9, kcal: 1e9, protein_g: -3, carbs_g: 1e9, fat_g: '12', fiber_g: null, confidence: 7,
+      grams: 1e9, kcal: 1e9, protein_g: -3, carbs_g: 1e9, fat_g: '12', fiber_g: null, confidence: 700,
     });
     expect(d).toEqual({
       name: 'Phở bò', ingredients: ['bánh phở', 'thịt bò'], quantity: 1, unit: 'bát',
@@ -312,5 +312,78 @@ describe('Gemini provider', () => {
     expect(geminiBlocked({ candidates: [{ finishReason: 'SAFETY' }] })).toBe(true);
     expect(geminiBlocked({ candidates: [{ finishReason: 'STOP' }] })).toBe(false);
     expect(geminiBlocked(null)).toBe(false);
+  });
+});
+
+describe('sanitizeDish: physical plausibility', () => {
+  const cơmTấm = { name: 'Cơm tấm sườn', quantity: 1, unit: 'đĩa', grams: 400, protein_g: 30, carbs_g: 85, fat_g: 25 };
+
+  it('a x10 kcal slip falls back to what the macros imply', () => {
+    expect(sanitizeDish({ ...cơmTấm, kcal: 6800 }).kcal).toBe(685);
+  });
+
+  it('never exceeds 9 kcal per gram, even without macros', () => {
+    expect(sanitizeDish({ name: 'Kẹo', quantity: 1, unit: 'viên', grams: 20, kcal: 5000 }).kcal).toBe(180);
+  });
+
+  it('keeps alcohol energy that sits outside the macros', () => {
+    expect(sanitizeDish({ name: 'Rượu vang', quantity: 1, unit: 'ly', grams: 150, kcal: 125, carbs_g: 4 }).kcal).toBe(125);
+    expect(sanitizeDish({ name: 'Whisky', quantity: 1, unit: 'ly', grams: 45, kcal: 100 }).kcal).toBe(100);
+    expect(sanitizeDish({ name: 'Bia', quantity: 1, unit: 'lon', grams: 330, kcal: 140, protein_g: 1.5, carbs_g: 11 }).kcal).toBe(140);
+  });
+
+  it('unknown weight: only the macro-based rules apply', () => {
+    expect(sanitizeDish({ name: 'Cơm', kcal: 900, carbs_g: 10 }).kcal).toBe(900);
+  });
+});
+
+describe('sanitizeDish: loosely typed numbers (Gemini without a hard schema)', () => {
+  it('reads thousands separators', () => {
+    expect(clampNumber('1,234', 0, 50000)).toBe(1234);
+    expect(clampNumber('1.234 kcal', 0, 50000)).toBe(1234);
+    expect(clampNumber('12.345', 0, 50000)).toBe(12345);
+    expect(sanitizeDish({ name: 'Cơm tấm', kcal: '1,234', protein_g: 40, carbs_g: 120, fat_g: 40, grams: 600 }).kcal).toBe(1234);
+  });
+
+  it('still reads decimals', () => {
+    expect(clampNumber('0,125', 0, 10)).toBe(0.125);
+    expect(clampNumber('0.125', 0, 10)).toBe(0.125);
+    expect(clampNumber('12,5', 0, 100)).toBe(12.5);
+    expect(clampNumber('1,2345', 0, 100)).toBe(1.2345);
+    expect(clampNumber('3.5', 0, 100)).toBe(3.5);
+  });
+
+  it('a 0-100 confidence is rescaled instead of becoming 100%', () => {
+    expect(sanitizeDish({ name: 'x', confidence: 85 }).confidence).toBe(0.85);
+    expect(sanitizeDish({ name: 'x', confidence: '40' }).confidence).toBe(0.4);
+    expect(sanitizeDish({ name: 'x', confidence: 0.8 }).confidence).toBe(0.8);
+    expect(sanitizeDish({ name: 'x', confidence: 1 }).confidence).toBe(1);
+    expect(sanitizeDish({ name: 'x', confidence: 250 }).confidence).toBe(1);
+    expect(sanitizeDish({ name: 'x', confidence: -1 }).confidence).toBe(0);
+  });
+});
+
+describe('Gemini response schema', () => {
+  const req = (opts = {}) => buildGeminiRequest({ mediaType: 'image/png', data: 'QUJD', hint: '', mode: 'photo', ...opts });
+
+  it('asks for typed numbers using the Gemini (OpenAPI) schema dialect', () => {
+    const schema = req().generationConfig.responseSchema;
+    expect(schema.type).toBe('OBJECT');
+    expect(schema.properties.dishes.type).toBe('ARRAY');
+    expect(schema.properties.dishes.items.properties.kcal.type).toBe('NUMBER');
+    expect(schema.properties.is_food.type).toBe('BOOLEAN');
+    expect(JSON.stringify(schema)).not.toContain('additionalProperties');
+    expect(schema.required).toEqual(['is_food', 'notes', 'dishes']);
+  });
+
+  it('schema: false gives the plain JSON-mode body (retry when the API rejects the schema)', () => {
+    const plain = req({ schema: false });
+    expect(plain.generationConfig).toEqual({ responseMimeType: 'application/json', temperature: 0.2 });
+    expect(plain.contents).toEqual(req().contents);
+  });
+
+  it('does not touch the Claude request', () => {
+    const c = buildAnthropicRequest({ model: 'claude-sonnet-5-5', mediaType: 'image/png', data: 'QUJD', hint: '', mode: 'photo' });
+    expect(c.output_config.format.schema.type).toBe('object');
   });
 });

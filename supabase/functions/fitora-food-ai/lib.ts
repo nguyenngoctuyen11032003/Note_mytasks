@@ -172,12 +172,22 @@ export function extractJson(text: unknown): Record<string, unknown> | null {
 const toNum = (v: unknown): number => {
   if (typeof v === 'number') return v;
   if (typeof v === 'string' && v.trim() !== '') {
-    // Models without a schema sometimes write units: "450 kcal", "120g", "~0,8".
-    const m = /^[~≈]?\s*(-?\d+(?:[.,]\d+)?)/.exec(v.trim());
-    return m ? Number(m[1].replace(',', '.')) : NaN;
+    // Models without a schema sometimes write units: "450 kcal", "120g", "~0,8" — and
+    // thousands separators: "1,234 kcal" / "1.234 kcal" (Vietnamese) mean 1234, not 1.234.
+    const m = /^[~≈]?\s*(-?[1-9]\d{0,2}(?:[.,]\d{3})+(?!\d)|-?\d+(?:[.,]\d+)?)/.exec(v.trim());
+    if (!m) return NaN;
+    const t = m[1];
+    return Number(/^-?[1-9]\d{0,2}(?:[.,]\d{3})+$/.test(t) ? t.replace(/[.,]/g, '') : t.replace(',', '.'));
   }
   return NaN;
 };
+
+/** Confidence 0–1; a 0–100 percentage (85) is rescaled instead of being clamped to 1. */
+export function normalizeConfidence(v: unknown, fallback = 0.5): number {
+  const n = toNum(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(1, Math.max(0, n > 1 && n <= 100 ? n / 100 : n));
+}
 
 /** Finite number clamped to [min, max]; non-finite → fallback. */
 export function clampNumber(v: unknown, min: number, max: number, fallback = min): number {
@@ -190,6 +200,10 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
 
 /** Reported kcal below this share of 4P+4C+9F is treated as a mistake and replaced. */
 export const KCAL_MIN_RATIO = 0.75;
+/** Pure fat is ~9 kcal/g: no food is denser. */
+export const MAX_KCAL_PER_G = 9;
+/** kcal a dish may carry beyond its macros per gram of dish (alcohol only: ≤ ~0.32 g/g × 7 kcal/g). */
+export const MAX_EXTRA_KCAL_PER_G = 2.4;
 const GRAM_UNITS = /^(g|gr|gram|grams|gam)\.?$/i;
 const ML_UNITS = /^ml$/i;
 
@@ -224,6 +238,14 @@ export function sanitizeDish(raw: unknown): AiDish | null {
   if (grams > 0 && grams < macroMass) grams = Math.min(LIMITS.grams, Math.ceil(macroMass));
   if (unit === 'g' && grams > 0) quantity = Math.min(LIMITS.quantity, grams);
 
+  // Plausibility against the (now final) weight. Energy beyond the macros can only be
+  // alcohol (~7 kcal/g of ethanol, at most ~0.32 g/g of drink); anything above that is a
+  // slip (x10, kcal of a bigger portion) → trust the macros. And nothing is denser than fat.
+  if (grams > 0) {
+    if (atwater > 0 && kcal > atwater + grams * MAX_EXTRA_KCAL_PER_G + 50) kcal = atwater;
+    kcal = Math.min(kcal, grams * MAX_KCAL_PER_G);
+  }
+
   const ingredients = Array.isArray(d.ingredients)
     ? d.ingredients.map((i) => cleanText(i, LIMITS.ingredient)).filter(Boolean).slice(0, MAX_INGREDIENTS)
     : [];
@@ -239,7 +261,7 @@ export function sanitizeDish(raw: unknown): AiDish | null {
     carbs_g,
     fat_g,
     fiber_g,
-    confidence: Math.round(clampNumber(d.confidence, 0, 1, 0.5) * 100) / 100,
+    confidence: Math.round(normalizeConfidence(d.confidence) * 100) / 100,
   };
 }
 
@@ -374,15 +396,30 @@ export function pickProvider(env: {
   return null;
 }
 
+/** JSON schema → Gemini's OpenAPI subset (upper-case types, no additionalProperties). */
+export function toGeminiSchema(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(toGeminiSchema);
+  if (!node || typeof node !== 'object') return node;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+    if (k === 'additionalProperties') continue;
+    out[k] = k === 'type' && typeof v === 'string' ? v.toUpperCase() : toGeminiSchema(v);
+  }
+  return out;
+}
+
 /**
- * Gemini generateContent request body (no secrets in here). JSON mode only, no
- * responseSchema: the prompt fixes the shape and sanitizeResult() enforces it.
+ * Gemini generateContent request body (no secrets in here). JSON mode with a
+ * responseSchema so numbers come back as numbers, as with Claude's structured output
+ * (sanitizeResult() still enforces the shape). `schema: false` builds the plain JSON-mode
+ * body, used as a retry when the API rejects the schema.
  */
 export function buildGeminiRequest(opts: {
   mediaType: ImageMime;
   data: string;
   hint: string;
   mode: ScanMode;
+  schema?: boolean;
 }): Record<string, unknown> {
   return {
     systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
@@ -393,7 +430,11 @@ export function buildGeminiRequest(opts: {
         { text: buildUserText(opts.hint, opts.mode) },
       ],
     }],
-    generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
+    generationConfig: {
+      responseMimeType: 'application/json',
+      temperature: 0.2,
+      ...(opts.schema === false ? {} : { responseSchema: toGeminiSchema(RESPONSE_SCHEMA) }),
+    },
   };
 }
 
