@@ -21,7 +21,7 @@
     "chart.js": "^4.5.1"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.8",
+    "@electric-sql/pglite": "^0.5.13",
     "happy-dom": "^20.14.6",
     "pg": "^8.23.1",
     "vite": "^8.3.4",
